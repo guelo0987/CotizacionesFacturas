@@ -5,6 +5,12 @@
 .env.test.local
 .env.production.local
 
+# Temporary Scratch Scripts & Credentials Audit Protection
+scratch/
+supabase/.temp/
+*.pem
+*.key
+
 # Logs
 logs
 *.log

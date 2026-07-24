@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, lazy, Suspense } from 'react';
 import type {
   AppState,
   TabType,
@@ -21,8 +21,12 @@ import { DocumentsView } from './components/DocumentsView';
 import { LoansView } from './components/LoansView';
 import { SettingsModal } from './components/SettingsModal';
 import { LoginModal } from './components/LoginModal';
-import { PdfModal } from './components/PdfModal';
 import { roundMoney } from './utils/sanitizer';
+
+// Vercel Bundle Optimization: Lazy load heavy PDF component containing html2pdf.js
+const PdfModal = lazy(() =>
+  import('./components/PdfModal').then((module) => ({ default: module.PdfModal }))
+);
 
 export function App() {
   const [state, setState] = useState<AppState>(getInitialState);
@@ -37,9 +41,17 @@ export function App() {
     doc: Cotizacion | Factura;
   } | null>(null);
 
+  // Auto-save to LocalStorage
   useEffect(() => {
     saveStateToStorage(state);
   }, [state]);
+
+  // Vercel React Best Practices: O(1) Map for client lookups
+  const clienteMap = useMemo(() => {
+    const map = new Map<string, Cliente>();
+    state.clientes.forEach((c) => map.set(c.id, c));
+    return map;
+  }, [state.clientes]);
 
   const handleSuccessLogin = (_email: string) => {
     setIsLoggedIn(true);
@@ -175,7 +187,7 @@ export function App() {
 
       const newMontoPagado = roundMoney(targetFactura.monto_pagado + pagoData.monto);
       const newSaldoPendiente = roundMoney(Math.max(0, targetFactura.total - newMontoPagado));
-      
+
       const newEstado =
         newSaldoPendiente === 0
           ? 'pagada'
@@ -279,7 +291,7 @@ export function App() {
       />
 
       <main className="flex-1 max-w-4xl w-full mx-auto p-4 sm:p-6">
-        {activeTab === 'inicio' && (
+        {activeTab === 'inicio' ? (
           <DashboardView
             state={state}
             onNavigateTab={setActiveTab}
@@ -288,18 +300,18 @@ export function App() {
             onOpenNewLoan={() => setActiveTab('prestamos')}
             onOpenNewClient={() => setActiveTab('clientes')}
           />
-        )}
+        ) : null}
 
-        {activeTab === 'clientes' && (
+        {activeTab === 'clientes' ? (
           <ClientsView
             state={state}
             onAddCliente={handleAddCliente}
             onUpdateCliente={handleUpdateCliente}
             onDeleteCliente={handleDeleteCliente}
           />
-        )}
+        ) : null}
 
-        {activeTab === 'documentos' && (
+        {activeTab === 'documentos' ? (
           <DocumentsView
             state={state}
             onAddCotizacion={handleAddCotizacion}
@@ -311,21 +323,21 @@ export function App() {
             onRegisterPago={handleRegisterPago}
             onOpenPdfPreview={(type, doc) => setPdfPreviewData({ type, doc })}
           />
-        )}
+        ) : null}
 
-        {activeTab === 'prestamos' && (
+        {activeTab === 'prestamos' ? (
           <LoansView
             state={state}
             onAddPrestamo={handleAddPrestamo}
             onUpdateCuotaEstado={handleUpdateCuotaEstado}
             onDeletePrestamo={handleDeletePrestamo}
           />
-        )}
+        ) : null}
       </main>
 
       <BottomNav activeTab={activeTab} setActiveTab={setActiveTab} />
 
-      {isSettingsOpen && (
+      {isSettingsOpen ? (
         <SettingsModal
           state={state}
           onSaveSettings={handleSaveSettings}
@@ -334,25 +346,33 @@ export function App() {
           onUpdateServicio={handleUpdateServicio}
           onDeleteServicio={handleDeleteServicio}
         />
-      )}
+      ) : null}
 
-      {isLoginOpen && (
+      {isLoginOpen ? (
         <LoginModal
           settings={state.settings}
           onSuccessLogin={handleSuccessLogin}
           onClose={() => setIsLoginOpen(false)}
         />
-      )}
+      ) : null}
 
-      {pdfPreviewData && (
-        <PdfModal
-          type={pdfPreviewData.type}
-          doc={pdfPreviewData.doc}
-          cliente={state.clientes.find((c) => c.id === pdfPreviewData.doc.cliente_id)}
-          settings={state.settings}
-          onClose={() => setPdfPreviewData(null)}
-        />
-      )}
+      {pdfPreviewData ? (
+        <Suspense
+          fallback={
+            <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center text-white text-sm font-semibold">
+              Cargando generador de PDF...
+            </div>
+          }
+        >
+          <PdfModal
+            type={pdfPreviewData.type}
+            doc={pdfPreviewData.doc}
+            cliente={clienteMap.get(pdfPreviewData.doc.cliente_id)}
+            settings={state.settings}
+            onClose={() => setPdfPreviewData(null)}
+          />
+        </Suspense>
+      ) : null}
     </div>
   );
 }

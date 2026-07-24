@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import type { BusinessSettings } from '../types';
 import { getSupabaseClient } from '../services/supabaseClient';
-import { ShieldCheck, Mail, Lock, ArrowRight, AlertCircle, Building2, UserPlus, LogIn } from 'lucide-react';
+import { ShieldCheck, Mail, Lock, ArrowRight, AlertCircle, Building2 } from 'lucide-react';
 
 interface LoginViewProps {
   settings: BusinessSettings;
@@ -9,18 +9,15 @@ interface LoginViewProps {
 }
 
 export const LoginView: React.FC<LoginViewProps> = ({ settings, onSuccessLogin }) => {
-  const [mode, setMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
-  const [successMsg, setSuccessMsg] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setErrorMsg('');
-    setSuccessMsg('');
 
     const cleanEmail = email.trim().toLowerCase();
     const cleanPass = password.trim();
@@ -34,44 +31,25 @@ export const LoginView: React.FC<LoginViewProps> = ({ settings, onSuccessLogin }
     const supabase = getSupabaseClient(settings.supabase_url, settings.supabase_anon_key);
     
     if (!supabase) {
-      setErrorMsg('Error de conexión con Supabase. Verifica tus variables de entorno.');
+      setErrorMsg('Error de conexión con Supabase. Verifica las variables de entorno.');
       setLoading(false);
       return;
     }
 
     try {
-      if (mode === 'login') {
-        // PURE SUPABASE AUTH LOGIN
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email: cleanEmail,
-          password: cleanPass,
-        });
+      // 100% PURE SUPABASE AUTH SIGN IN
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: cleanEmail,
+        password: cleanPass,
+      });
 
-        if (error) {
-          setErrorMsg(`Error al iniciar sesión: ${error.message}`);
-        } else if (data.user) {
-          onSuccessLogin(data.user.email || cleanEmail);
-        }
-      } else {
-        // PURE SUPABASE AUTH REGISTER
-        const { data, error } = await supabase.auth.signUp({
-          email: cleanEmail,
-          password: cleanPass,
-        });
-
-        if (error) {
-          setErrorMsg(`Error en registro: ${error.message}`);
-        } else if (data.user) {
-          if (data.session) {
-            onSuccessLogin(data.user.email || cleanEmail);
-          } else {
-            setSuccessMsg('¡Usuario registrado exitosamente en Supabase! Puedes iniciar sesión ahora.');
-            setMode('login');
-          }
-        }
+      if (error) {
+        setErrorMsg(`Error de inicio de sesión: ${error.message}`);
+      } else if (data.user) {
+        onSuccessLogin(data.user.email || cleanEmail);
       }
     } catch (err: any) {
-      setErrorMsg(`Error inesperado: ${err.message || 'Error de autenticación'}`);
+      setErrorMsg(`Error de autenticación: ${err.message || 'Credenciales inválidas'}`);
     }
 
     setLoading(false);
@@ -106,44 +84,9 @@ export const LoginView: React.FC<LoginViewProps> = ({ settings, onSuccessLogin }
               {settings.business_name || 'Sistema de Gestión'}
             </h1>
             <p className="text-xs sm:text-sm text-slate-500 font-medium">
-              Autenticación Real con Supabase Auth
+              Iniciar Sesión con Supabase Auth
             </p>
           </div>
-        </div>
-
-        {/* Mode Selector Tabs: Iniciar Sesión / Registrarse */}
-        <div className="bg-slate-200/70 p-1 rounded-2xl flex items-center text-xs font-bold">
-          <button
-            type="button"
-            onClick={() => {
-              setMode('login');
-              setErrorMsg('');
-              setSuccessMsg('');
-            }}
-            className={`flex-1 py-2.5 rounded-xl transition-all flex items-center justify-center gap-1.5 ${
-              mode === 'login'
-                ? 'bg-white text-emerald-800 shadow-xs border border-slate-200'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <LogIn className="w-4 h-4 text-emerald-600" /> Iniciar Sesión
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setMode('register');
-              setErrorMsg('');
-              setSuccessMsg('');
-            }}
-            className={`flex-1 py-2.5 rounded-xl transition-all flex items-center justify-center gap-1.5 ${
-              mode === 'register'
-                ? 'bg-white text-emerald-800 shadow-xs border border-slate-200'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <UserPlus className="w-4 h-4 text-emerald-600" /> Crear Cuenta
-          </button>
         </div>
 
         {/* Main Light Pastel Card */}
@@ -152,7 +95,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ settings, onSuccessLogin }
             <div className="flex items-center gap-2">
               <ShieldCheck className="w-5 h-5 text-emerald-600" />
               <h2 className="text-xs font-bold text-slate-700 uppercase tracking-wider font-heading">
-                {mode === 'login' ? 'Acceso al Sistema' : 'Registro de Nuevo Usuario'}
+                Acceso de Usuario
               </h2>
             </div>
             <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-full">
@@ -165,13 +108,6 @@ export const LoginView: React.FC<LoginViewProps> = ({ settings, onSuccessLogin }
               <div className="bg-red-50 border border-red-200 text-red-700 text-xs p-3.5 rounded-2xl font-medium flex items-center gap-2 animate-in fade-in">
                 <AlertCircle className="w-4 h-4 shrink-0 text-red-500" />
                 <span>{errorMsg}</span>
-              </div>
-            ) : null}
-
-            {successMsg ? (
-              <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs p-3.5 rounded-2xl font-medium flex items-center gap-2 animate-in fade-in">
-                <ShieldCheck className="w-4 h-4 shrink-0 text-emerald-600" />
-                <span>{successMsg}</span>
               </div>
             ) : null}
 
@@ -215,10 +151,10 @@ export const LoginView: React.FC<LoginViewProps> = ({ settings, onSuccessLogin }
               className="w-full py-3.5 rounded-2xl font-bold text-xs text-white bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] transition-all duration-200 shadow-md shadow-emerald-600/20 flex items-center justify-center gap-2 group mt-2"
             >
               {loading ? (
-                'Procesando...'
+                'Autenticando...'
               ) : (
                 <>
-                  <span>{mode === 'login' ? 'Iniciar Sesión' : 'Crear Cuenta en Supabase'}</span>
+                  <span>Iniciar Sesión</span>
                   <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
                 </>
               )}
@@ -227,7 +163,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ settings, onSuccessLogin }
 
           <div className="pt-2 text-center border-t border-slate-100">
             <p className="text-[11px] text-slate-400 font-medium">
-              Conectado a Supabase Auth · {settings.supabase_url ? 'Nube Activa' : 'Desconectado'}
+              Base de Datos: <span className="text-emerald-700 font-bold">Supabase PostgreSQL</span>
             </p>
           </div>
         </div>

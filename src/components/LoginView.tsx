@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import type { BusinessSettings } from '../types';
 import { getSupabaseClient } from '../services/supabaseClient';
-import { ShieldCheck, Mail, Lock, ArrowRight, AlertCircle, Building2 } from 'lucide-react';
+import { Mail, Lock, ArrowRight, AlertCircle, Building2 } from 'lucide-react';
 
 interface LoginViewProps {
   settings: BusinessSettings;

@@ -340,7 +340,7 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
               </p>
               <button
                 onClick={openCreateQuoteModal}
-                className="mt-3 text-sm text-blue-400 font-semibold hover:underline"
+                className="mt-3 text-sm text-emerald-600 font-semibold hover:underline"
               >
                 + Crear la primera cotización
               </button>
@@ -364,7 +364,7 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
                             cot.estado === 'aceptada'
                               ? 'bg-emerald-50 text-emerald-600 border-emerald-500/30'
                               : cot.estado === 'enviada'
-                              ? 'bg-blue-500/10 text-blue-400 border-blue-500/30'
+                              ? 'bg-emerald-50 text-emerald-600 border-emerald-200'
                               : cot.estado === 'rechazada'
                               ? 'bg-red-50 text-red-600 border-red-500/30'
                               : 'bg-slate-100 text-slate-600 border-slate-600'
@@ -383,7 +383,7 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
                     </div>
 
                     <div className="text-right">
-                      <span className="text-base font-black text-blue-400 block">
+                      <span className="text-base font-black text-emerald-600 block">
                         {formatCurrency(cot.total)}
                       </span>
                       {cot.aplica_itbis && (
@@ -400,7 +400,7 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
                         onClick={() => onOpenPdfPreview('cotizacion', cot)}
                         className="flex items-center gap-1 text-slate-600 hover:text-white bg-slate-100/60 hover:bg-slate-100 px-2.5 py-1 rounded-lg transition-colors text-xs"
                       >
-                        <Eye className="w-3.5 h-3.5 text-blue-400" /> PDF
+                        <Eye className="w-3.5 h-3.5 text-emerald-600" /> PDF
                       </button>
 
                       <a

@@ -206,7 +206,7 @@ export const LoansView: React.FC<LoansViewProps> = ({
                         ? 'bg-emerald-50 text-emerald-600 border-emerald-500/30'
                         : cuotasAtrasadas.length > 0
                         ? 'bg-red-50 text-red-600 border-red-500/30'
-                        : 'bg-blue-500/10 text-blue-400 border-blue-500/30'
+                        : 'bg-emerald-50 text-emerald-600 border-emerald-200'
                     }`}
                   >
                     {progressPercent >= 100
@@ -226,7 +226,7 @@ export const LoansView: React.FC<LoansViewProps> = ({
                   </div>
                   <div>
                     <span className="text-[11px] text-slate-400 block">Tasa ({prestamo.tasa_interes}%)</span>
-                    <span className="font-bold text-blue-400">
+                    <span className="font-bold text-emerald-600">
                       +{formatCurrency(prestamo.interes_total)}
                     </span>
                   </div>
@@ -340,7 +340,7 @@ export const LoansView: React.FC<LoansViewProps> = ({
                         tasa_interes: parseFloat(e.target.value) || 0,
                       })
                     }
-                    className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold text-blue-400 focus:outline-none"
+                    className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold text-emerald-600 focus:outline-none"
                   />
                 </div>
               </div>
@@ -407,7 +407,7 @@ export const LoansView: React.FC<LoansViewProps> = ({
 
                 <div className="flex justify-between text-sm text-slate-600">
                   <span>Interés total ({tasaInteres}%):</span>
-                  <span className="font-bold text-blue-400">
+                  <span className="font-bold text-emerald-600">
                     {formatCurrency(interesTotalLive)}
                   </span>
                 </div>

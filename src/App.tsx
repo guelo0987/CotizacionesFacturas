@@ -13,6 +13,7 @@ import type {
   EstadoPrestamo,
 } from './types';
 import { getInitialState, saveStateToStorage } from './services/store';
+import { getSupabaseClient } from './services/supabaseClient';
 import { Header } from './components/Header';
 import { BottomNav } from './components/BottomNav';
 import { DashboardView } from './components/DashboardView';
@@ -47,6 +48,31 @@ export function App() {
     saveStateToStorage(state);
   }, [state]);
 
+  // OWASP Security & JWT Session Listener: Listen for JWT token refresh or invalidation
+  useEffect(() => {
+    const supabase = getSupabaseClient(state.settings.supabase_url, state.settings.supabase_anon_key);
+    if (!supabase) return;
+
+    // Verify existing JWT session on app mount
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session && session.user) {
+        setIsLoggedIn(true);
+      }
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        if (session) setIsLoggedIn(true);
+      } else if (event === 'SIGNED_OUT') {
+        setIsLoggedIn(false);
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [state.settings.supabase_url, state.settings.supabase_anon_key]);
+
   // Vercel React Best Practices: O(1) Map for client lookups
   const clienteMap = useMemo(() => {
     const map = new Map<string, Cliente>();
@@ -58,7 +84,15 @@ export function App() {
     setIsLoggedIn(true);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    const supabase = getSupabaseClient(state.settings.supabase_url, state.settings.supabase_anon_key);
+    if (supabase) {
+      try {
+        await supabase.auth.signOut();
+      } catch (e) {
+        console.error('Error signing out session', e);
+      }
+    }
     setIsLoggedIn(false);
   };
 

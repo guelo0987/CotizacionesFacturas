@@ -32,7 +32,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab })
   ];
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-40 bg-slate-900/95 backdrop-blur-lg border-t border-slate-800 pb-safe">
+    <nav className="fixed bottom-0 left-0 right-0 z-40 glass-panel border-t border-white/10 pb-safe shadow-2xl">
       <div className="max-w-4xl mx-auto flex items-center justify-around h-16 px-2">
         {navItems.map((item) => {
           const isActive = activeTab === item.id;
@@ -42,15 +42,15 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab })
               onClick={() => setActiveTab(item.id)}
               className={`flex flex-col items-center justify-center flex-1 h-full gap-1 transition-all duration-200 relative ${
                 isActive
-                  ? 'text-emerald-400 font-bold'
+                  ? 'text-emerald-400 font-bold scale-105'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              {isActive && (
-                <span className="absolute top-0 w-8 h-1 bg-emerald-500 rounded-b-full shadow-lg shadow-emerald-500/50" />
-              )}
+              {isActive ? (
+                <span className="absolute top-0 w-10 h-1 bg-emerald-400 rounded-b-full shadow-lg shadow-emerald-500/50" />
+              ) : null}
               {item.icon}
-              <span className="text-[11px] font-medium leading-none">{item.label}</span>
+              <span className="text-[11px] font-medium leading-none tracking-tight">{item.label}</span>
             </button>
           );
         })}

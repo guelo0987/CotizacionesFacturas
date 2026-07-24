@@ -1,24 +1,24 @@
 import React from 'react';
 import type { BusinessSettings } from '../types';
-import { Settings, LogIn, ShieldCheck, HelpCircle } from 'lucide-react';
+import { Settings, HelpCircle, LogOut, Building2 } from 'lucide-react';
 
 interface HeaderProps {
   settings: BusinessSettings;
   isLoggedIn: boolean;
   onOpenSettings: () => void;
-  onOpenLogin: () => void;
   onOpenTutorial: () => void;
+  onLogout: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   settings,
   isLoggedIn,
   onOpenSettings,
-  onOpenLogin,
   onOpenTutorial,
+  onLogout,
 }) => {
   return (
-    <header className="sticky top-0 z-40 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-4 py-3">
+    <header className="sticky top-0 z-40 glass-panel border-b border-white/10 px-4 py-3 shadow-xl">
       <div className="max-w-4xl mx-auto flex items-center justify-between">
         {/* Business Brand & Logo */}
         <div className="flex items-center gap-3">
@@ -26,60 +26,57 @@ export const Header: React.FC<HeaderProps> = ({
             <img
               src={settings.logo_url}
               alt={settings.business_name}
-              className="w-10 h-10 rounded-xl object-cover border border-slate-700 shadow-sm"
+              className="w-10 h-10 rounded-2xl object-cover border border-white/10 shadow-sm"
               onError={(e) => {
                 (e.target as HTMLElement).style.display = 'none';
               }}
             />
           ) : (
-            <div className="w-10 h-10 rounded-xl bg-emerald-600/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center font-bold text-lg">
-              {settings.business_name ? settings.business_name.charAt(0).toUpperCase() : 'N'}
+            <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 flex items-center justify-center font-bold text-base font-heading">
+              <Building2 className="w-5 h-5 text-emerald-400" />
             </div>
           )}
 
           <div>
-            <h1 className="text-base font-bold text-slate-100 truncate max-w-[180px] sm:max-w-xs leading-tight">
+            <h1 className="text-sm sm:text-base font-extrabold text-white truncate max-w-[170px] sm:max-w-xs leading-tight font-heading">
               {settings.business_name || 'Mi Negocio'}
             </h1>
-            <p className="text-xs text-slate-400 font-medium">
-              RD$ · ITBIS {settings.itbis_rate}%
+            <p className="text-[11px] text-slate-400 font-medium flex items-center gap-1.5">
+              <span>RD$</span>
+              <span>•</span>
+              <span>ITBIS {settings.itbis_rate}%</span>
             </p>
           </div>
         </div>
 
         {/* Action Buttons */}
-        <div className="flex items-center gap-1.5 sm:gap-2">
+        <div className="flex items-center gap-2">
           <button
             onClick={onOpenTutorial}
-            className="flex items-center gap-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors"
-            title="Ver Tutorial / Guía de Uso"
+            className="flex items-center gap-1.5 bg-slate-800/80 hover:bg-slate-700/80 text-emerald-400 border border-emerald-500/20 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all shadow-sm"
+            title="Ver Tutorial de Uso"
           >
-            <HelpCircle className="w-4 h-4" />
+            <HelpCircle className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Guía</span>
           </button>
 
-          {isLoggedIn ? (
-            <div className="flex items-center gap-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-2.5 py-1 rounded-full text-xs font-semibold">
-              <ShieldCheck className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Sesión Activa</span>
-            </div>
-          ) : (
-            <button
-              onClick={onOpenLogin}
-              className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
-            >
-              <LogIn className="w-3.5 h-3.5 text-blue-400" />
-              <span>Ingresar</span>
-            </button>
-          )}
-
           <button
             onClick={onOpenSettings}
-            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 rounded-lg transition-colors"
+            className="p-2 bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 hover:text-white border border-slate-700/80 rounded-xl transition-all"
             title="Ajustes del Negocio"
           >
             <Settings className="w-4 h-4" />
           </button>
+
+          {isLoggedIn ? (
+            <button
+              onClick={onLogout}
+              className="p-2 bg-slate-800/80 hover:bg-red-500/20 text-slate-400 hover:text-red-400 border border-slate-700/80 hover:border-red-500/30 rounded-xl transition-all"
+              title="Cerrar Sesión"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          ) : null}
         </div>
       </div>
     </header>

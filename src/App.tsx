@@ -20,7 +20,7 @@ import { ClientsView } from './components/ClientsView';
 import { DocumentsView } from './components/DocumentsView';
 import { LoansView } from './components/LoansView';
 import { SettingsModal } from './components/SettingsModal';
-import { LoginModal } from './components/LoginModal';
+import { LoginView } from './components/LoginView';
 import { TutorialModal } from './components/TutorialModal';
 import { roundMoney } from './utils/sanitizer';
 
@@ -36,7 +36,6 @@ export function App() {
 
   // Modals & Tutorial state
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isLoginOpen, setIsLoginOpen] = useState(false);
   const [isTutorialOpen, setIsTutorialOpen] = useState(false);
   const [pdfPreviewData, setPdfPreviewData] = useState<{
     type: 'cotizacion' | 'factura';
@@ -57,6 +56,10 @@ export function App() {
 
   const handleSuccessLogin = (_email: string) => {
     setIsLoggedIn(true);
+  };
+
+  const handleLogout = () => {
+    setIsLoggedIn(false);
   };
 
   // --- Handlers: Clientes ---
@@ -283,17 +286,22 @@ export function App() {
     setState((prev) => ({ ...prev, settings: newSettings }));
   };
 
+  // STRICT AUTH GUARD: Require login before accessing application
+  if (!isLoggedIn) {
+    return <LoginView settings={state.settings} onSuccessLogin={handleSuccessLogin} />;
+  }
+
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
+    <div className="min-h-screen bg-[#0b0f19] text-slate-100 flex flex-col font-sans">
       <Header
         settings={state.settings}
         isLoggedIn={isLoggedIn}
         onOpenSettings={() => setIsSettingsOpen(true)}
-        onOpenLogin={() => setIsLoginOpen(true)}
         onOpenTutorial={() => setIsTutorialOpen(true)}
+        onLogout={handleLogout}
       />
 
-      <main className="flex-1 max-w-4xl w-full mx-auto p-4 sm:p-6">
+      <main className="flex-1 max-w-4xl w-full mx-auto p-4 sm:p-6 pb-20">
         {activeTab === 'inicio' ? (
           <DashboardView
             state={state}
@@ -351,14 +359,6 @@ export function App() {
         />
       ) : null}
 
-      {isLoginOpen ? (
-        <LoginModal
-          settings={state.settings}
-          onSuccessLogin={handleSuccessLogin}
-          onClose={() => setIsLoginOpen(false)}
-        />
-      ) : null}
-
       <TutorialModal
         isOpen={isTutorialOpen}
         onClose={() => setIsTutorialOpen(false)}
@@ -367,7 +367,7 @@ export function App() {
       {pdfPreviewData ? (
         <Suspense
           fallback={
-            <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center text-white text-sm font-semibold">
+            <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center text-white text-sm font-semibold">
               Cargando generador de PDF...
             </div>
           }

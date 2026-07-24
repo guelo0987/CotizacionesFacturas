@@ -5,14 +5,14 @@ const STORAGE_KEY = 'cotizaciones_facturas_prestamos_prod_v2';
 const DEFAULT_SETTINGS: BusinessSettings = {
   business_name: 'Mi Negocio de Servicios',
   phone: '',
-  email: '',
+  email: 'yeisito@gmail.com',
   address: '',
   documento: '',
   logo_url: '',
   itbis_rate: 18,
   currency: 'RD$',
   supabase_url: 'https://hxeovachlapvfubcebha.supabase.co',
-  supabase_anon_key: '',
+  supabase_anon_key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh4ZW92YWNobGFwdmZ1YmNlYmhhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ4ODM0NDcsImV4cCI6MjEwMDQ1OTQ0N30.c-CmCmKcqmTksouDUtPeUg2VbLOvRITydY1WwNy81cA',
 };
 
 const DEFAULT_SERVICIOS: Servicio[] = [

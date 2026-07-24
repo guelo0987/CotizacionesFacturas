@@ -23,16 +23,26 @@ export function formatCurrency(amount: number | string | undefined | null): stri
     .replace('DOP', 'RD$');
 }
 
-// Format Dominican date (e.g., 22/07/2026)
+// Format Dominican date (e.g., 22/07/2026) without timezone shift
 export function formatDate(dateString: string | undefined | null): string {
   if (!dateString) return '';
   try {
+    if (typeof dateString === 'string' && dateString.includes('-')) {
+      const parts = dateString.split('T')[0].split('-');
+      if (parts.length === 3) {
+        const year = parts[0];
+        const month = parts[1].padStart(2, '0');
+        const day = parts[2].padStart(2, '0');
+        return `${day}/${month}/${year}`;
+      }
+    }
     const date = new Date(dateString);
     if (isNaN(date.getTime())) return dateString;
     return new Intl.DateTimeFormat('es-DO', {
       day: '2-digit',
       month: '2-digit',
       year: 'numeric',
+      timeZone: 'UTC',
     }).format(date);
   } catch {
     return dateString;
@@ -41,8 +51,14 @@ export function formatDate(dateString: string | undefined | null): string {
 
 // Calculate due date based on start date and days
 export function addDaysToDate(dateString: string, days: number): string {
-  const date = new Date(dateString || Date.now());
-  date.setDate(date.getDate() + days);
+  const parts = dateString ? dateString.split('-') : [];
+  let date: Date;
+  if (parts.length === 3) {
+    date = new Date(Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2])));
+  } else {
+    date = new Date();
+  }
+  date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().split('T')[0];
 }
 

@@ -1,11 +1,11 @@
-import type { Servicio, BusinessSettings, AppState } from '../types';
+import type { BusinessSettings, AppState } from '../types';
 
-const STORAGE_KEY = 'cotizaciones_facturas_prestamos_prod_v2';
+const STORAGE_KEY = 'cotizaciones_facturas_prestamos_prod_v3';
 
 const DEFAULT_SETTINGS: BusinessSettings = {
-  business_name: 'Mi Negocio de Servicios',
+  business_name: 'Mi Negocio',
   phone: '',
-  email: 'yeisito@gmail.com',
+  email: '',
   address: '',
   documento: '',
   logo_url: '',
@@ -15,39 +15,6 @@ const DEFAULT_SETTINGS: BusinessSettings = {
   supabase_anon_key: import.meta.env.VITE_SUPABASE_ANON_KEY || '',
 };
 
-const DEFAULT_SERVICIOS: Servicio[] = [
-  {
-    id: 'serv-1',
-    nombre: 'Servicio Básico de Plomería / Fontanería',
-    categoria: 'plomería',
-    descripcion: 'Instalación o reparación técnica básica.',
-    precio_base: 2000,
-    unidad: 'servicio',
-    activo: true,
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: 'serv-2',
-    nombre: 'Servicio Básico Eléctrico / Breaker',
-    categoria: 'electricidad',
-    descripcion: 'Instalación de luminaria, tomacorriente o breaker.',
-    precio_base: 1500,
-    unidad: 'unidad',
-    activo: true,
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: 'serv-3',
-    nombre: 'Pintura y Mano de Obra (M²)',
-    categoria: 'pintura',
-    descripcion: 'Aplicación de pintura en paredes o techos.',
-    precio_base: 250,
-    unidad: 'm²',
-    activo: true,
-    created_at: new Date().toISOString(),
-  },
-];
-
 export function getInitialState(): AppState {
   const saved = localStorage.getItem(STORAGE_KEY);
   if (saved) {
@@ -56,7 +23,7 @@ export function getInitialState(): AppState {
       return {
         settings: { ...DEFAULT_SETTINGS, ...parsed.settings },
         clientes: parsed.clientes || [],
-        servicios: parsed.servicios || DEFAULT_SERVICIOS,
+        servicios: parsed.servicios || [],
         cotizaciones: parsed.cotizaciones || [],
         facturas: parsed.facturas || [],
         prestamos: parsed.prestamos || [],
@@ -70,7 +37,7 @@ export function getInitialState(): AppState {
   return {
     settings: DEFAULT_SETTINGS,
     clientes: [],
-    servicios: DEFAULT_SERVICIOS,
+    servicios: [],
     cotizaciones: [],
     facturas: [],
     prestamos: [],

@@ -14,6 +14,7 @@ import type {
 } from './types';
 import { getInitialState, saveStateToStorage } from './services/store';
 import { getSupabaseClient } from './services/supabaseClient';
+import { supabaseDataService } from './services/supabaseDataService';
 import { Header } from './components/Header';
 import { BottomNav } from './components/BottomNav';
 import { DashboardView } from './components/DashboardView';
@@ -34,6 +35,7 @@ export function App() {
   const [state, setState] = useState<AppState>(getInitialState);
   const [activeTab, setActiveTab] = useState<TabType>('inicio');
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [loadingData, setLoadingData] = useState(false);
 
   // Modals & Tutorial state
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -48,12 +50,11 @@ export function App() {
     saveStateToStorage(state);
   }, [state]);
 
-  // OWASP Security & JWT Session Listener: Listen for JWT token refresh or invalidation
+  // OWASP Security & JWT Session Listener
   useEffect(() => {
     const supabase = getSupabaseClient(state.settings.supabase_url, state.settings.supabase_anon_key);
     if (!supabase) return;
 
-    // Verify existing JWT session on app mount
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session && session.user) {
         setIsLoggedIn(true);
@@ -72,6 +73,47 @@ export function App() {
       subscription.unsubscribe();
     };
   }, [state.settings.supabase_url, state.settings.supabase_anon_key]);
+
+  // Fetch Live Supabase Cloud Database Data when Logged In
+  useEffect(() => {
+    if (!isLoggedIn) return;
+
+    let isMounted = true;
+    async function loadCloudData() {
+      setLoadingData(true);
+      try {
+        const [cli, serv, cot, fac, pres, pag] = await Promise.all([
+          supabaseDataService.fetchClientes(),
+          supabaseDataService.fetchServicios(),
+          supabaseDataService.fetchCotizaciones(),
+          supabaseDataService.fetchFacturas(),
+          supabaseDataService.fetchPrestamos(),
+          supabaseDataService.fetchPagos(),
+        ]);
+
+        if (isMounted) {
+          setState((prev) => ({
+            ...prev,
+            clientes: cli.length > 0 ? cli : prev.clientes,
+            servicios: serv.length > 0 ? serv : prev.servicios,
+            cotizaciones: cot.length > 0 ? cot : prev.cotizaciones,
+            facturas: fac.length > 0 ? fac : prev.facturas,
+            prestamos: pres.length > 0 ? pres : prev.prestamos,
+            pagos: pag.length > 0 ? pag : prev.pagos,
+          }));
+        }
+      } catch (e) {
+        console.error('Error fetching Supabase cloud data:', e);
+      } finally {
+        if (isMounted) setLoadingData(false);
+      }
+    }
+
+    loadCloudData();
+    return () => {
+      isMounted = false;
+    };
+  }, [isLoggedIn]);
 
   // Vercel React Best Practices: O(1) Map for client lookups
   const clienteMap = useMemo(() => {
@@ -97,8 +139,9 @@ export function App() {
   };
 
   // --- Handlers: Clientes ---
-  const handleAddCliente = (clienteData: Omit<Cliente, 'id' | 'created_at'>) => {
-    const newCliente: Cliente = {
+  const handleAddCliente = async (clienteData: Omit<Cliente, 'id' | 'created_at'>) => {
+    const created = await supabaseDataService.createCliente(clienteData);
+    const newCliente: Cliente = created || {
       ...clienteData,
       id: `cli-${Date.now()}`,
       created_at: new Date().toISOString(),
@@ -109,14 +152,16 @@ export function App() {
     }));
   };
 
-  const handleUpdateCliente = (updatedCliente: Cliente) => {
+  const handleUpdateCliente = async (updatedCliente: Cliente) => {
+    await supabaseDataService.updateCliente(updatedCliente.id, updatedCliente);
     setState((prev) => ({
       ...prev,
       clientes: prev.clientes.map((c) => (c.id === updatedCliente.id ? updatedCliente : c)),
     }));
   };
 
-  const handleDeleteCliente = (id: string) => {
+  const handleDeleteCliente = async (id: string) => {
+    await supabaseDataService.deleteCliente(id);
     setState((prev) => ({
       ...prev,
       clientes: prev.clientes.filter((c) => c.id !== id),
@@ -124,8 +169,9 @@ export function App() {
   };
 
   // --- Handlers: Servicios ---
-  const handleAddServicio = (servicioData: Omit<Servicio, 'id' | 'created_at'>) => {
-    const newServicio: Servicio = {
+  const handleAddServicio = async (servicioData: Omit<Servicio, 'id' | 'created_at'>) => {
+    const created = await supabaseDataService.createServicio(servicioData);
+    const newServicio: Servicio = created || {
       ...servicioData,
       id: `serv-${Date.now()}`,
       created_at: new Date().toISOString(),
@@ -136,14 +182,16 @@ export function App() {
     }));
   };
 
-  const handleUpdateServicio = (updatedServicio: Servicio) => {
+  const handleUpdateServicio = async (updatedServicio: Servicio) => {
+    await supabaseDataService.updateServicio(updatedServicio.id, updatedServicio);
     setState((prev) => ({
       ...prev,
       servicios: prev.servicios.map((s) => (s.id === updatedServicio.id ? updatedServicio : s)),
     }));
   };
 
-  const handleDeleteServicio = (id: string) => {
+  const handleDeleteServicio = async (id: string) => {
+    await supabaseDataService.deleteServicio(id);
     setState((prev) => ({
       ...prev,
       servicios: prev.servicios.filter((s) => s.id !== id),
@@ -151,8 +199,9 @@ export function App() {
   };
 
   // --- Handlers: Cotizaciones ---
-  const handleAddCotizacion = (cotData: Omit<Cotizacion, 'id' | 'created_at'>) => {
-    const newCot: Cotizacion = {
+  const handleAddCotizacion = async (cotData: Omit<Cotizacion, 'id' | 'created_at'>) => {
+    const created = await supabaseDataService.createCotizacion(cotData);
+    const newCot: Cotizacion = created || {
       ...cotData,
       id: `cot-${Date.now()}`,
       created_at: new Date().toISOString(),
@@ -163,14 +212,16 @@ export function App() {
     }));
   };
 
-  const handleUpdateCotizacion = (updatedCot: Cotizacion) => {
+  const handleUpdateCotizacion = async (updatedCot: Cotizacion) => {
+    await supabaseDataService.updateCotizacion(updatedCot.id, updatedCot);
     setState((prev) => ({
       ...prev,
       cotizaciones: prev.cotizaciones.map((c) => (c.id === updatedCot.id ? updatedCot : c)),
     }));
   };
 
-  const handleDeleteCotizacion = (id: string) => {
+  const handleDeleteCotizacion = async (id: string) => {
+    await supabaseDataService.deleteCotizacion(id);
     setState((prev) => ({
       ...prev,
       cotizaciones: prev.cotizaciones.filter((c) => c.id !== id),
@@ -178,8 +229,9 @@ export function App() {
   };
 
   // --- Handlers: Facturas & Pagos ---
-  const handleAddFactura = (facData: Omit<Factura, 'id' | 'created_at'>) => {
-    const newFac: Factura = {
+  const handleAddFactura = async (facData: Omit<Factura, 'id' | 'created_at'>) => {
+    const created = await supabaseDataService.createFactura(facData);
+    const newFac: Factura = created || {
       ...facData,
       id: `fac-${Date.now()}`,
       created_at: new Date().toISOString(),
@@ -190,27 +242,37 @@ export function App() {
     }));
   };
 
-  const handleUpdateFactura = (updatedFac: Factura) => {
+  const handleUpdateFactura = async (updatedFac: Factura) => {
+    await supabaseDataService.updateFactura(updatedFac.id, updatedFac);
     setState((prev) => ({
       ...prev,
       facturas: prev.facturas.map((f) => (f.id === updatedFac.id ? updatedFac : f)),
     }));
   };
 
-  const handleDeleteFactura = (id: string) => {
+  const handleDeleteFactura = async (id: string) => {
+    await supabaseDataService.deleteFactura(id);
     setState((prev) => ({
       ...prev,
       facturas: prev.facturas.filter((f) => f.id !== id),
     }));
   };
 
-  const handleRegisterPago = (pagoData: {
+  const handleRegisterPago = async (pagoData: {
     factura_id: string;
     monto: number;
     metodo: MetodoPago;
     referencia?: string;
   }) => {
-    const newPago: Pago = {
+    const createdPago = await supabaseDataService.createPago({
+      factura_id: pagoData.factura_id,
+      monto: pagoData.monto,
+      fecha: new Date().toISOString(),
+      metodo: pagoData.metodo,
+      referencia: pagoData.referencia,
+    });
+
+    const newPago: Pago = createdPago || {
       id: `pago-${Date.now()}`,
       factura_id: pagoData.factura_id,
       monto: pagoData.monto,
@@ -242,6 +304,8 @@ export function App() {
         pagos: [...(targetFactura.pagos || []), newPago],
       };
 
+      supabaseDataService.updateFactura(updatedFactura.id, updatedFactura);
+
       return {
         ...prev,
         pagos: [newPago, ...prev.pagos],
@@ -251,8 +315,9 @@ export function App() {
   };
 
   // --- Handlers: Préstamos ---
-  const handleAddPrestamo = (presData: Omit<Prestamo, 'id' | 'created_at'>) => {
-    const prestamoId = `pres-${Date.now()}`;
+  const handleAddPrestamo = async (presData: Omit<Prestamo, 'id' | 'created_at'>) => {
+    const created = await supabaseDataService.createPrestamo(presData);
+    const prestamoId = created?.id || `pres-${Date.now()}`;
     const updatedCuotas = presData.cuotas?.map((c) => ({ ...c, prestamo_id: prestamoId }));
 
     const newPrestamo: Prestamo = {
@@ -309,7 +374,8 @@ export function App() {
     });
   };
 
-  const handleDeletePrestamo = (id: string) => {
+  const handleDeletePrestamo = async (id: string) => {
+    await supabaseDataService.deletePrestamo(id);
     setState((prev) => ({
       ...prev,
       prestamos: prev.prestamos.filter((p) => p.id !== id),
@@ -326,7 +392,7 @@ export function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0b0f19] text-slate-100 flex flex-col font-sans">
+    <div className="min-h-screen bg-[#f8fafc] text-slate-900 flex flex-col font-sans">
       <Header
         settings={state.settings}
         isLoggedIn={isLoggedIn}
@@ -336,6 +402,12 @@ export function App() {
       />
 
       <main className="flex-1 max-w-4xl w-full mx-auto p-4 sm:p-6 pb-20">
+        {loadingData ? (
+          <div className="text-center py-12 text-slate-500 text-xs font-semibold">
+            Sincronizando datos con Supabase Cloud...
+          </div>
+        ) : null}
+
         {activeTab === 'inicio' ? (
           <DashboardView
             state={state}

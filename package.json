@@ -12,8 +12,10 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.110.8",
     "@tailwindcss/vite": "^4.3.3",
+    "@types/pg": "^8.20.0",
     "html2pdf.js": "^0.14.0",
     "lucide-react": "^1.25.0",
+    "pg": "^8.22.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "tailwindcss": "^4.3.3"

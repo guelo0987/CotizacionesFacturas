@@ -1,9 +1,6 @@
--- Migración Inicial de Supabase con Mejores Prácticas de Postgres y Seguridad RLS
-
--- 1. Habilitar extensión UUID
 create extension if not exists "uuid-ossp";
 
--- 2. Tabla Clientes
+-- 1. Tabla Clientes
 create table if not exists public.clientes (
   id uuid primary key default gen_random_uuid(),
   user_id uuid default auth.uid(),
@@ -16,7 +13,7 @@ create table if not exists public.clientes (
   created_at timestamp with time zone default now()
 );
 
--- 3. Tabla Servicios (Catálogo)
+-- 2. Tabla Servicios
 create table if not exists public.servicios (
   id uuid primary key default gen_random_uuid(),
   user_id uuid default auth.uid(),
@@ -29,7 +26,7 @@ create table if not exists public.servicios (
   created_at timestamp with time zone default now()
 );
 
--- 4. Tabla Cotizaciones
+-- 3. Tabla Cotizaciones
 create table if not exists public.cotizaciones (
   id uuid primary key default gen_random_uuid(),
   user_id uuid default auth.uid(),
@@ -46,7 +43,7 @@ create table if not exists public.cotizaciones (
   created_at timestamp with time zone default now()
 );
 
--- 5. Tabla Cotizacion Items
+-- 4. Tabla Cotizacion Items
 create table if not exists public.cotizacion_items (
   id uuid primary key default gen_random_uuid(),
   cotizacion_id uuid references public.cotizaciones(id) on delete cascade,
@@ -57,7 +54,7 @@ create table if not exists public.cotizacion_items (
   importe numeric default 0
 );
 
--- 6. Tabla Facturas
+-- 5. Tabla Facturas
 create table if not exists public.facturas (
   id uuid primary key default gen_random_uuid(),
   user_id uuid default auth.uid(),
@@ -77,7 +74,7 @@ create table if not exists public.facturas (
   created_at timestamp with time zone default now()
 );
 
--- 7. Tabla Factura Items
+-- 6. Tabla Factura Items
 create table if not exists public.factura_items (
   id uuid primary key default gen_random_uuid(),
   factura_id uuid references public.facturas(id) on delete cascade,
@@ -88,7 +85,7 @@ create table if not exists public.factura_items (
   importe numeric default 0
 );
 
--- 8. Tabla Préstamos
+-- 7. Tabla Préstamos
 create table if not exists public.prestamos (
   id uuid primary key default gen_random_uuid(),
   user_id uuid default auth.uid(),
@@ -104,7 +101,7 @@ create table if not exists public.prestamos (
   created_at timestamp with time zone default now()
 );
 
--- 9. Tabla Cuotas
+-- 8. Tabla Cuotas
 create table if not exists public.cuotas (
   id uuid primary key default gen_random_uuid(),
   prestamo_id uuid references public.prestamos(id) on delete cascade,
@@ -115,7 +112,7 @@ create table if not exists public.cuotas (
   estado text default 'pendiente'
 );
 
--- 10. Tabla Pagos
+-- 9. Tabla Pagos
 create table if not exists public.pagos (
   id uuid primary key default gen_random_uuid(),
   factura_id uuid references public.facturas(id) on delete cascade,
@@ -128,25 +125,17 @@ create table if not exists public.pagos (
   created_at timestamp with time zone default now()
 );
 
--- ----------------------------------------------------
--- ÍNDICES DE CLAVES FORÁNEAS Y ESTADOS (Mejores Prácticas Postgres)
--- ----------------------------------------------------
+-- Índices de Rendimiento (Postgres Best Practices)
 create index if not exists idx_cotizaciones_cliente_id on public.cotizaciones(cliente_id);
 create index if not exists idx_cotizacion_items_cotizacion_id on public.cotizacion_items(cotizacion_id);
-create index if not exists idx_cotizacion_items_servicio_id on public.cotizacion_items(servicio_id);
 create index if not exists idx_facturas_cliente_id on public.facturas(cliente_id);
-create index if not exists idx_facturas_cotizacion_id on public.facturas(cotizacion_id);
 create index if not exists idx_factura_items_factura_id on public.factura_items(factura_id);
-create index if not exists idx_factura_items_servicio_id on public.factura_items(servicio_id);
 create index if not exists idx_prestamos_cliente_id on public.prestamos(cliente_id);
 create index if not exists idx_cuotas_prestamo_id on public.cuotas(prestamo_id);
 create index if not exists idx_pagos_factura_id on public.pagos(factura_id);
 create index if not exists idx_pagos_prestamo_id on public.pagos(prestamo_id);
-create index if not exists idx_pagos_cuota_id on public.pagos(cuota_id);
 
--- ----------------------------------------------------
--- HABILITACIÓN DE SEGURIDAD RLS (Row Level Security)
--- ----------------------------------------------------
+-- RLS & Permisos Flexibles
 alter table public.clientes enable row level security;
 alter table public.servicios enable row level security;
 alter table public.cotizaciones enable row level security;
@@ -157,47 +146,24 @@ alter table public.prestamos enable row level security;
 alter table public.cuotas enable row level security;
 alter table public.pagos enable row level security;
 
--- ----------------------------------------------------
--- POLÍTICAS RLS SEGÚN REGLAS DE SEGURIDAD DE SUPABASE
--- ----------------------------------------------------
--- Políticas para rol autenticado
-create policy "Acceso completo clientes usuario" on public.clientes
-  for all to authenticated
-  using ((select auth.uid()) = user_id or user_id is null)
-  with check ((select auth.uid()) = user_id or user_id is null);
+drop policy if exists "Permitir todo clientes" on public.clientes;
+drop policy if exists "Permitir todo servicios" on public.servicios;
+drop policy if exists "Permitir todo cotizaciones" on public.cotizaciones;
+drop policy if exists "Permitir todo cotizacion_items" on public.cotizacion_items;
+drop policy if exists "Permitir todo facturas" on public.facturas;
+drop policy if exists "Permitir todo factura_items" on public.factura_items;
+drop policy if exists "Permitir todo prestamos" on public.prestamos;
+drop policy if exists "Permitir todo cuotas" on public.cuotas;
+drop policy if exists "Permitir todo pagos" on public.pagos;
 
-create policy "Acceso completo servicios usuario" on public.servicios
-  for all to authenticated
-  using ((select auth.uid()) = user_id or user_id is null)
-  with check ((select auth.uid()) = user_id or user_id is null);
+create policy "Permitir todo clientes" on public.clientes for all using (true) with check (true);
+create policy "Permitir todo servicios" on public.servicios for all using (true) with check (true);
+create policy "Permitir todo cotizaciones" on public.cotizaciones for all using (true) with check (true);
+create policy "Permitir todo cotizacion_items" on public.cotizacion_items for all using (true) with check (true);
+create policy "Permitir todo facturas" on public.facturas for all using (true) with check (true);
+create policy "Permitir todo factura_items" on public.factura_items for all using (true) with check (true);
+create policy "Permitir todo prestamos" on public.prestamos for all using (true) with check (true);
+create policy "Permitir todo cuotas" on public.cuotas for all using (true) with check (true);
+create policy "Permitir todo pagos" on public.pagos for all using (true) with check (true);
 
-create policy "Acceso completo cotizaciones usuario" on public.cotizaciones
-  for all to authenticated
-  using ((select auth.uid()) = user_id or user_id is null)
-  with check ((select auth.uid()) = user_id or user_id is null);
-
-create policy "Acceso completo cotizacion_items usuario" on public.cotizacion_items
-  for all to authenticated using (true) with check (true);
-
-create policy "Acceso completo facturas usuario" on public.facturas
-  for all to authenticated
-  using ((select auth.uid()) = user_id or user_id is null)
-  with check ((select auth.uid()) = user_id or user_id is null);
-
-create policy "Acceso completo factura_items usuario" on public.factura_items
-  for all to authenticated using (true) with check (true);
-
-create policy "Acceso completo prestamos usuario" on public.prestamos
-  for all to authenticated
-  using ((select auth.uid()) = user_id or user_id is null)
-  with check ((select auth.uid()) = user_id or user_id is null);
-
-create policy "Acceso completo cuotas usuario" on public.cuotas
-  for all to authenticated using (true) with check (true);
-
-create policy "Acceso completo pagos usuario" on public.pagos
-  for all to authenticated using (true) with check (true);
-
--- Permisos explícitos para la Data API de Supabase
-grant all on all tables in schema public to authenticated;
-grant select on all tables in schema public to anon;
+grant all on all tables in schema public to anon, authenticated;

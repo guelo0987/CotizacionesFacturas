@@ -143,6 +143,18 @@ export const LoginView: React.FC<LoginViewProps> = ({ settings, onSuccessLogin }
               )}
             </button>
           </form>
+
+          <div className="pt-6 text-center">
+            <p className="text-xs text-slate-500">
+              ¿Olvidaste tu contraseña o tienes problemas para ingresar?
+            </p>
+            <a 
+              href="mailto:miguelcruzmatias@icloud.com" 
+              className="text-xs font-bold text-emerald-600 hover:text-emerald-700 mt-1 inline-block"
+            >
+              Contacta a Soporte (miguelcruzmatias@icloud.com)
+            </a>
+          </div>
         </div>
       </div>
     </div>

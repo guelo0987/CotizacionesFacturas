@@ -49,7 +49,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   return (
     <div className="space-y-8 pb-12 font-sans">
       {/* Top Banner Hero */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 shadow-sm">
+      <div className="tour-dashboard-hero bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 shadow-sm">
         <div className="space-y-2">
           <div className="flex items-center gap-2 text-sm font-bold text-emerald-700 uppercase tracking-wider">
             <TrendingUp className="w-5 h-5 text-emerald-600" /> Panel Operativo

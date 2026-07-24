@@ -41,7 +41,7 @@ export const Header: React.FC<HeaderProps> = ({
             <h1 className="text-sm sm:text-base font-extrabold text-slate-900 truncate max-w-[170px] sm:max-w-xs leading-tight font-heading">
               {settings.business_name || 'Mi Negocio'}
             </h1>
-            <p className="text-[11px] text-slate-500 font-medium flex items-center gap-1.5">
+            <p className="text-xs text-slate-400 font-medium flex items-center gap-1.5">
               <span>RD$</span>
               <span>•</span>
               <span>ITBIS {settings.itbis_rate}%</span>
@@ -53,7 +53,7 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex items-center gap-2">
           <button
             onClick={onOpenTutorial}
-            className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-emerald-800 border border-slate-200 px-3 py-1.5 rounded-xl text-xs font-bold transition-all"
+            className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-emerald-800 border border-slate-200 px-3 py-1.5 rounded-xl text-sm font-bold transition-all"
             title="Ver Tutorial de Uso"
           >
             <HelpCircle className="w-3.5 h-3.5 text-emerald-600" />
@@ -62,7 +62,7 @@ export const Header: React.FC<HeaderProps> = ({
 
           <button
             onClick={onOpenSettings}
-            className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-xl transition-all"
+            className="tour-ajustes p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-xl transition-all"
             title="Ajustes del Negocio"
           >
             <Settings className="w-4 h-4" />
@@ -71,7 +71,7 @@ export const Header: React.FC<HeaderProps> = ({
           {isLoggedIn ? (
             <button
               onClick={onLogout}
-              className="p-2 bg-slate-100 hover:bg-red-50 text-slate-500 hover:text-red-600 border border-slate-200 rounded-xl transition-all"
+              className="p-2 bg-slate-100 hover:bg-red-50 text-slate-400 hover:text-red-600 border border-slate-200 rounded-xl transition-all"
               title="Cerrar Sesión"
             >
               <LogOut className="w-4 h-4" />

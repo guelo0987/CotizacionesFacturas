@@ -40,17 +40,17 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab })
             <button
               key={item.id}
               onClick={() => setActiveTab(item.id)}
-              className={`flex flex-col items-center justify-center flex-1 h-full gap-1 transition-all duration-200 relative ${
+              className={`tour-nav-${item.id} flex flex-col items-center justify-center flex-1 h-full gap-1 transition-all duration-200 relative ${
                 isActive
                   ? 'text-emerald-700 font-extrabold scale-105'
-                  : 'text-slate-500 hover:text-slate-800'
+                  : 'text-slate-400 hover:text-slate-800'
               }`}
             >
               {isActive ? (
                 <span className="absolute top-0 w-10 h-1 bg-emerald-600 rounded-b-full shadow-sm" />
               ) : null}
               {item.icon}
-              <span className="text-[11px] font-medium leading-none tracking-tight">{item.label}</span>
+              <span className="text-xs font-medium leading-none tracking-tight">{item.label}</span>
             </button>
           );
         })}

@@ -21,9 +21,10 @@ import { DocumentsView } from './components/DocumentsView';
 import { LoansView } from './components/LoansView';
 import { SettingsModal } from './components/SettingsModal';
 import { LoginModal } from './components/LoginModal';
+import { TutorialModal } from './components/TutorialModal';
 import { roundMoney } from './utils/sanitizer';
 
-// Vercel Bundle Optimization: Lazy load heavy PDF component containing html2pdf.js
+// Vercel Bundle Optimization: Lazy load heavy PDF component
 const PdfModal = lazy(() =>
   import('./components/PdfModal').then((module) => ({ default: module.PdfModal }))
 );
@@ -33,9 +34,10 @@ export function App() {
   const [activeTab, setActiveTab] = useState<TabType>('inicio');
   const [isLoggedIn, setIsLoggedIn] = useState(false);
 
-  // Modals
+  // Modals & Tutorial state
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isLoginOpen, setIsLoginOpen] = useState(false);
+  const [isTutorialOpen, setIsTutorialOpen] = useState(false);
   const [pdfPreviewData, setPdfPreviewData] = useState<{
     type: 'cotizacion' | 'factura';
     doc: Cotizacion | Factura;
@@ -288,6 +290,7 @@ export function App() {
         isLoggedIn={isLoggedIn}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenLogin={() => setIsLoginOpen(true)}
+        onOpenTutorial={() => setIsTutorialOpen(true)}
       />
 
       <main className="flex-1 max-w-4xl w-full mx-auto p-4 sm:p-6">
@@ -355,6 +358,11 @@ export function App() {
           onClose={() => setIsLoginOpen(false)}
         />
       ) : null}
+
+      <TutorialModal
+        isOpen={isTutorialOpen}
+        onClose={() => setIsTutorialOpen(false)}
+      />
 
       {pdfPreviewData ? (
         <Suspense

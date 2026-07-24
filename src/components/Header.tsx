@@ -1,12 +1,13 @@
 import React from 'react';
 import type { BusinessSettings } from '../types';
-import { Settings, LogIn, ShieldCheck } from 'lucide-react';
+import { Settings, LogIn, ShieldCheck, HelpCircle } from 'lucide-react';
 
 interface HeaderProps {
   settings: BusinessSettings;
   isLoggedIn: boolean;
   onOpenSettings: () => void;
   onOpenLogin: () => void;
+  onOpenTutorial: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -14,6 +15,7 @@ export const Header: React.FC<HeaderProps> = ({
   isLoggedIn,
   onOpenSettings,
   onOpenLogin,
+  onOpenTutorial,
 }) => {
   return (
     <header className="sticky top-0 z-40 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-4 py-3">
@@ -36,7 +38,7 @@ export const Header: React.FC<HeaderProps> = ({
           )}
 
           <div>
-            <h1 className="text-base font-bold text-slate-100 truncate max-w-[200px] sm:max-w-xs leading-tight">
+            <h1 className="text-base font-bold text-slate-100 truncate max-w-[180px] sm:max-w-xs leading-tight">
               {settings.business_name || 'Mi Negocio'}
             </h1>
             <p className="text-xs text-slate-400 font-medium">
@@ -46,7 +48,16 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Action Buttons */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2">
+          <button
+            onClick={onOpenTutorial}
+            className="flex items-center gap-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors"
+            title="Ver Tutorial / Guía de Uso"
+          >
+            <HelpCircle className="w-4 h-4" />
+            <span className="hidden sm:inline">Guía</span>
+          </button>
+
           {isLoggedIn ? (
             <div className="flex items-center gap-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-2.5 py-1 rounded-full text-xs font-semibold">
               <ShieldCheck className="w-3.5 h-3.5" />

@@ -47,89 +47,94 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   });
 
   return (
-    <div className="space-y-6 pb-8 font-sans">
+    <div className="space-y-8 pb-12 font-sans">
       {/* Top Banner Hero */}
-      <div className="bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-8 shadow-sm relative overflow-hidden">
-        <div className="absolute -right-12 -bottom-12 w-48 h-48 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none" />
-        <div className="relative z-10 space-y-1">
-          <div className="flex items-center gap-2 text-xs font-bold text-emerald-700 uppercase tracking-widest font-heading">
-            <TrendingUp className="w-4 h-4 text-emerald-600" /> Panel Operativo
+      <div className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 shadow-sm">
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 text-sm font-bold text-emerald-700 uppercase tracking-wider">
+            <TrendingUp className="w-5 h-5 text-emerald-600" /> Panel Operativo
           </div>
-          <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight font-heading">
+          <h2 className="text-3xl font-bold text-slate-800">
             {state.settings.business_name || 'Resumen General'}
           </h2>
-          <p className="text-xs sm:text-sm text-slate-500 font-medium">
+          <p className="text-sm text-slate-500">
             Control de cuentas por cobrar, cotizaciones y préstamos en RD$.
           </p>
         </div>
       </div>
 
       {/* Metric Cards Grid - Maximum 2 Colors: Slate Neutral & Emerald Accent */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
         <div
           onClick={() => onNavigateTab('documentos')}
-          className="bg-white border border-slate-200/90 hover:border-emerald-500/40 rounded-3xl p-6 cursor-pointer transition-all duration-200 shadow-sm hover:shadow-md group hover:scale-[1.01]"
+          className="bg-white border border-slate-200 hover:border-emerald-500 rounded-2xl p-6 cursor-pointer transition-colors shadow-sm flex flex-col justify-between"
         >
-          <div className="flex items-center justify-between mb-4">
-            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Por Cobrar</span>
-            <div className="w-10 h-10 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-700 flex items-center justify-center">
-              <Wallet className="w-5 h-5" />
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <span className="text-sm font-bold text-slate-500 uppercase">Por Cobrar</span>
+              <div className="w-12 h-12 rounded-xl bg-slate-50 border border-slate-200 text-emerald-600 flex items-center justify-center">
+                <Wallet className="w-6 h-6" />
+              </div>
+            </div>
+            <div className="text-3xl font-bold text-slate-800 mb-2">
+              {formatCurrency(totalPorCobrar)}
             </div>
           </div>
-          <div className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight mb-2 font-heading">
-            {formatCurrency(totalPorCobrar)}
-          </div>
-          <div className="flex items-center justify-between text-xs text-slate-500 pt-3 border-t border-slate-100">
+          <div className="flex items-center justify-between text-sm text-slate-500 pt-4 border-t border-slate-100">
             <span>
               {state.facturas.filter((f) => f.saldo_pendiente > 0).length} facturas pendientes
             </span>
-            <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-emerald-600 group-hover:translate-x-1 transition-all" />
+            <ArrowRight className="w-4 h-4 text-slate-400" />
           </div>
         </div>
 
         <div
           onClick={() => onNavigateTab('documentos')}
-          className="bg-white border border-slate-200/90 hover:border-emerald-500/40 rounded-3xl p-6 cursor-pointer transition-all duration-200 shadow-sm hover:shadow-md group hover:scale-[1.01]"
+          className="bg-white border border-slate-200 hover:border-emerald-500 rounded-2xl p-6 cursor-pointer transition-colors shadow-sm flex flex-col justify-between"
         >
-          <div className="flex items-center justify-between mb-4">
-            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Cotizaciones</span>
-            <div className="w-10 h-10 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-700 flex items-center justify-center">
-              <FileCheck className="w-5 h-5" />
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <span className="text-sm font-bold text-slate-500 uppercase">Cotizaciones</span>
+              <div className="w-12 h-12 rounded-xl bg-slate-50 border border-slate-200 text-emerald-600 flex items-center justify-center">
+                <FileCheck className="w-6 h-6" />
+              </div>
+            </div>
+            <div className="text-3xl font-bold text-slate-800 mb-2">
+              {cotizacionesActivas.length}
             </div>
           </div>
-          <div className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight mb-2 font-heading">
-            {cotizacionesActivas.length}
-          </div>
-          <div className="flex items-center justify-between text-xs text-slate-500 pt-3 border-t border-slate-100">
+          <div className="flex items-center justify-between text-sm text-slate-500 pt-4 border-t border-slate-100">
             <span>Activas por responder</span>
-            <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-emerald-600 group-hover:translate-x-1 transition-all" />
+            <ArrowRight className="w-4 h-4 text-slate-400" />
           </div>
         </div>
 
         <div
           onClick={() => onNavigateTab('prestamos')}
-          className="bg-white border border-slate-200/90 hover:border-emerald-500/40 rounded-3xl p-6 cursor-pointer transition-all duration-200 shadow-sm hover:shadow-md group hover:scale-[1.01]"
+          className="bg-white border border-slate-200 hover:border-emerald-500 rounded-2xl p-6 cursor-pointer transition-colors shadow-sm flex flex-col justify-between"
         >
-          <div className="flex items-center justify-between mb-4">
-            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Préstamos</span>
-            <div className="w-10 h-10 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-700 flex items-center justify-center">
-              <Landmark className="w-5 h-5" />
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <span className="text-sm font-bold text-slate-500 uppercase">Préstamos</span>
+              <div className="w-12 h-12 rounded-xl bg-slate-50 border border-slate-200 text-emerald-600 flex items-center justify-center">
+                <Landmark className="w-6 h-6" />
+              </div>
+            </div>
+            <div className="flex items-baseline gap-2 mb-2">
+              <span className="text-3xl font-bold text-slate-800">
+                {prestamosActivos.length}
+              </span>
+              <span className="text-sm text-slate-500">activos</span>
+              {cuotasAtrasadasCount > 0 ? (
+                <span className="ml-auto inline-flex items-center gap-1 text-xs font-bold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200">
+                  <AlertTriangle className="w-4 h-4 text-emerald-600" /> {cuotasAtrasadasCount} atraso
+                </span>
+              ) : null}
             </div>
           </div>
-          <div className="flex items-baseline gap-2 mb-2">
-            <span className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight font-heading">
-              {prestamosActivos.length}
-            </span>
-            <span className="text-xs text-slate-500 font-medium">activos</span>
-            {cuotasAtrasadasCount > 0 ? (
-              <span className="ml-auto inline-flex items-center gap-1 text-[11px] font-bold text-red-700 bg-red-50 px-2.5 py-1 rounded-full border border-red-200">
-                <AlertTriangle className="w-3 h-3 text-red-600" /> {cuotasAtrasadasCount} atraso
-              </span>
-            ) : null}
-          </div>
-          <div className="flex items-center justify-between text-xs text-slate-500 pt-3 border-t border-slate-100">
+          <div className="flex items-center justify-between text-sm text-slate-500 pt-4 border-t border-slate-100">
             <span>Gestión de cuotas</span>
-            <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-emerald-600 group-hover:translate-x-1 transition-all" />
+            <ArrowRight className="w-4 h-4 text-slate-400" />
           </div>
         </div>
       </div>

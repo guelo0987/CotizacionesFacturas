@@ -11,8 +11,8 @@ const DEFAULT_SETTINGS: BusinessSettings = {
   logo_url: '',
   itbis_rate: 18,
   currency: 'RD$',
-  supabase_url: 'https://hxeovachlapvfubcebha.supabase.co',
-  supabase_anon_key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh4ZW92YWNobGFwdmZ1YmNlYmhhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ4ODM0NDcsImV4cCI6MjEwMDQ1OTQ0N30.c-CmCmKcqmTksouDUtPeUg2VbLOvRITydY1WwNy81cA',
+  supabase_url: import.meta.env.VITE_SUPABASE_URL || 'https://hxeovachlapvfubcebha.supabase.co',
+  supabase_anon_key: import.meta.env.VITE_SUPABASE_ANON_KEY || '',
 };
 
 const DEFAULT_SERVICIOS: Servicio[] = [

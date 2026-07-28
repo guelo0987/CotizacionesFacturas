@@ -32,6 +32,10 @@ a que cada uno termine antes del siguiente:
 | 2 | `supabase/migrations/20260728000100_funciones_negocio.sql` | Funciones de negocio: numeración correlativa, guardado atómico de documentos con sus líneas, pagos, préstamos |
 | 3 | `supabase/migrations/20260728000200_storage_logos.sql` | Bucket de logos con acceso por organización |
 | 4 | `supabase/migrations/20260728000300_verificacion.sql` | **No modifica nada.** Comprueba que todo quedó bien |
+| 5 | `supabase/migrations/20260728000400_correccion_permisos.sql` | Cierra el USAGE que `anon` hereda de `PUBLIC` y elimina las políticas permisivas creadas a mano que el script 1 no podía conocer por nombre |
+
+Después del 5, **vuelve a ejecutar el script 4**: las 11 comprobaciones
+deben salir en `OK`.
 
 Cada script es autónomo e idempotente: puedes volver a ejecutarlo sin romper
 nada si algo falla a medias.

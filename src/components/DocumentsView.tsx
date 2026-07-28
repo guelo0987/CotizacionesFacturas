@@ -1,404 +1,524 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import type {
   AppState,
   Cotizacion,
   Factura,
-  CotizacionItem,
-  FacturaItem,
+  LineaDocumento,
   MetodoPago,
-  Cliente,
   Servicio,
 } from '../types';
-import { sanitizeString, formatCurrency, formatDate, roundMoney } from '../utils/sanitizer';
-import { generateWhatsappQuoteUrl, generateWhatsappInvoiceUrl } from '../utils/whatsapp';
-
+import type { SolicitudApertura } from '../App';
+import { formatCurrency, formatDate } from '../utils/sanitizer';
+import { calcularImporteLinea, calcularTotalesDocumento } from '../utils/calculos';
 import {
+  aNumero,
+  limpiarTexto,
+  limpiarTextoMultilinea,
+  primerError,
+  redondearDinero,
+  sanearNumero,
+  validarCantidad,
+  validarFecha,
+  validarMonto,
+  validarNCF,
+  describirNCF,
+  validarEntero,
+} from '../utils/validacion';
+import { useAccionAsync } from '../hooks/useAccionAsync';
+import { generateWhatsappQuoteUrl, generateWhatsappInvoiceUrl } from '../utils/whatsapp';
+import {
+  AlertCircle,
+  ArrowRightLeft,
+  Calendar,
+  CheckCircle2,
+  DollarSign,
+  Edit2,
+  Eye,
   FileText,
   Plus,
   Search,
-  ArrowRightLeft,
   Share2,
-  DollarSign,
-  Calendar,
-  CheckCircle2,
   Trash2,
   X,
-  Eye,
 } from 'lucide-react';
+
+type SubTab = 'cotizaciones' | 'facturas';
+
+interface LineaEditable extends LineaDocumento {
+  clave: string;
+}
 
 interface DocumentsViewProps {
   state: AppState;
-  onAddCotizacion: (cotizacion: Omit<Cotizacion, 'id' | 'created_at'>) => void;
-  onUpdateCotizacion: (cotizacion: Cotizacion) => void;
-  onDeleteCotizacion: (id: string) => void;
-  onAddFactura: (factura: Omit<Factura, 'id' | 'created_at'>) => void;
-  onUpdateFactura: (factura: Factura) => void;
-  onDeleteFactura: (id: string) => void;
-  onRegisterPago: (pago: { factura_id: string; monto: number; metodo: MetodoPago; referencia?: string }) => void;
+  solicitud: SolicitudApertura | null;
+  onGuardarCotizacion: (
+    datos: Partial<Cotizacion> & { cliente_id: string },
+    items: LineaDocumento[]
+  ) => Promise<void>;
+  onDeleteCotizacion: (cot: Cotizacion) => Promise<void>;
+  onConvertirEnFactura: (cot: Cotizacion) => Promise<void>;
+  onGuardarFactura: (
+    datos: Partial<Factura> & { cliente_id: string },
+    items: LineaDocumento[]
+  ) => Promise<void>;
+  onDeleteFactura: (fac: Factura) => Promise<void>;
+  onRegistrarPago: (pago: {
+    factura_id: string;
+    monto: number;
+    metodo: MetodoPago;
+    referencia?: string;
+  }) => Promise<void>;
   onOpenPdfPreview: (type: 'cotizacion' | 'factura', doc: Cotizacion | Factura) => void;
-  initialSubTab?: 'cotizaciones' | 'facturas';
 }
+
+let contadorClaves = 0;
+const nuevaClave = () => `linea-${++contadorClaves}`;
+
+const lineaVacia = (): LineaEditable => ({
+  clave: nuevaClave(),
+  servicio_id: null,
+  descripcion: '',
+  cantidad: 1,
+  precio_unitario: 0,
+  importe: 0,
+});
+
+const hoyISO = () => new Date().toISOString().split('T')[0];
 
 export const DocumentsView: React.FC<DocumentsViewProps> = ({
   state,
-  onAddCotizacion,
-  onUpdateCotizacion,
+  solicitud,
+  onGuardarCotizacion,
   onDeleteCotizacion,
-  onAddFactura,
-  onUpdateFactura,
+  onConvertirEnFactura,
+  onGuardarFactura,
   onDeleteFactura,
-  onRegisterPago,
+  onRegistrarPago,
   onOpenPdfPreview,
-  initialSubTab = 'cotizaciones',
 }) => {
-  const [subTab, setSubTab] = useState<'cotizaciones' | 'facturas'>(initialSubTab);
+  const [subTab, setSubTab] = useState<SubTab>('cotizaciones');
   const [search, setSearch] = useState('');
 
-  // Modals
   const [isDocModalOpen, setIsDocModalOpen] = useState(false);
-  const [editingCotizacion, setEditingCotizacion] = useState<Cotizacion | null>(null);
-  const [editingFactura, setEditingFactura] = useState<Factura | null>(null);
+  const [editandoId, setEditandoId] = useState<string | null>(null);
+  const [numeroEditando, setNumeroEditando] = useState<string>('');
+  const [errorForm, setErrorForm] = useState('');
 
-  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
-  const [paymentFactura, setPaymentFactura] = useState<Factura | null>(null);
-  const [paymentMonto, setPaymentMonto] = useState<number>(0);
-  const [paymentMetodo, setPaymentMetodo] = useState<MetodoPago>('efectivo');
-  const [paymentRef, setPaymentRef] = useState<string>('');
-
-  // Document Form State
   const [formData, setFormData] = useState({
     cliente_id: '',
-    numero: '',
-    ncf: '',
-    fecha: new Date().toISOString().split('T')[0],
+    fecha: hoyISO(),
     validez_dias: 15,
+    ncf: '',
     aplica_itbis: true,
     notas: '',
-    items: [
-      { descripcion: '', cantidad: 1, precio_unitario: 0, importe: 0 },
-    ] as (CotizacionItem | FacturaItem)[],
+    items: [lineaVacia()] as LineaEditable[],
   });
 
-  // Calculate numbers
-  const nextCotNumero = `COT-2026-${String(state.cotizaciones.length + 1).padStart(4, '0')}`;
-  const nextFacNumero = `FAC-2026-${String(state.facturas.length + 1).padStart(4, '0')}`;
+  const [pagoFacturaId, setPagoFacturaId] = useState<string | null>(null);
+  const [pagoMonto, setPagoMonto] = useState('');
+  const [pagoMetodo, setPagoMetodo] = useState<MetodoPago>('efectivo');
+  const [pagoRef, setPagoRef] = useState('');
+  const [errorPago, setErrorPago] = useState('');
 
-  const openCreateQuoteModal = () => {
-    setEditingCotizacion(null);
-    setEditingFactura(null);
+  const { ejecutando, ejecutar } = useAccionAsync();
+
+  const clientesActivos = useMemo(
+    () => state.clientes.filter((c) => c.activo),
+    [state.clientes]
+  );
+  const serviciosActivos = useMemo(
+    () => state.servicios.filter((s) => s.activo),
+    [state.servicios]
+  );
+
+  // La factura del modal de pago se deriva del estado, para que el saldo
+  // mostrado sea siempre el actual y no una copia congelada.
+  const pagoFactura = useMemo(
+    () => state.facturas.find((f) => f.id === pagoFacturaId) ?? null,
+    [state.facturas, pagoFacturaId]
+  );
+
+  const abrirCreacion = React.useCallback(
+    (tipo: SubTab) => {
+      setSubTab(tipo);
+      setEditandoId(null);
+      setNumeroEditando('');
+      setErrorForm('');
+      setFormData({
+        cliente_id: '',
+        fecha: hoyISO(),
+        validez_dias: 15,
+        ncf: '',
+        aplica_itbis: true,
+        notas: '',
+        items: [lineaVacia()],
+      });
+      setIsDocModalOpen(true);
+    },
+    []
+  );
+
+  // Apertura desde las acciones rápidas del panel
+  useEffect(() => {
+    if (solicitud?.destino === 'cotizacion') abrirCreacion('cotizaciones');
+    else if (solicitud?.destino === 'factura') abrirCreacion('facturas');
+  }, [solicitud, abrirCreacion]);
+
+  /** Edición: carga el documento y sus líneas en el formulario. */
+  const abrirEdicion = (doc: Cotizacion | Factura, tipo: SubTab) => {
+    const factura = tipo === 'facturas' ? (doc as Factura) : null;
+    setSubTab(tipo);
+    setEditandoId(doc.id);
+    setNumeroEditando(doc.numero);
+    setErrorForm('');
     setFormData({
-      cliente_id: state.clientes[0]?.id || '',
-      numero: nextCotNumero,
-      ncf: '',
-      fecha: new Date().toISOString().split('T')[0],
-      validez_dias: 15,
-      aplica_itbis: true,
-      notas: '',
-      items: [{ id: 'item-1', descripcion: '', cantidad: 1, precio_unitario: 0, importe: 0 }],
+      cliente_id: doc.cliente_id,
+      fecha: (doc.fecha ?? '').split('T')[0] || hoyISO(),
+      validez_dias: (doc as Cotizacion).validez_dias ?? 15,
+      ncf: factura?.ncf ?? '',
+      aplica_itbis: doc.aplica_itbis,
+      notas: doc.notas ?? '',
+      items:
+        doc.items && doc.items.length > 0
+          ? doc.items.map((it) => ({
+              clave: nuevaClave(),
+              servicio_id: it.servicio_id ?? null,
+              descripcion: it.descripcion,
+              cantidad: Number(it.cantidad),
+              precio_unitario: Number(it.precio_unitario),
+              importe: Number(it.importe),
+            }))
+          : [lineaVacia()],
     });
     setIsDocModalOpen(true);
   };
 
-  const openCreateInvoiceModal = () => {
-    setEditingCotizacion(null);
-    setEditingFactura(null);
-    setFormData({
-      cliente_id: state.clientes[0]?.id || '',
-      numero: nextFacNumero,
-      ncf: '',
-      fecha: new Date().toISOString().split('T')[0],
-      validez_dias: 15,
-      aplica_itbis: true,
-      notas: '',
-      items: [{ id: 'item-1', descripcion: '', cantidad: 1, precio_unitario: 0, importe: 0 }],
-    });
-    setIsDocModalOpen(true);
+  // ---------------------------------------------------------------
+  // Líneas
+  // ---------------------------------------------------------------
+  const actualizarLinea = (clave: string, cambios: Partial<LineaEditable>) => {
+    setFormData((prev) => ({
+      ...prev,
+      items: prev.items.map((it) => {
+        if (it.clave !== clave) return it;
+        const fusionada = { ...it, ...cambios };
+        fusionada.importe = calcularImporteLinea(fusionada.cantidad, fusionada.precio_unitario);
+        return fusionada;
+      }),
+    }));
   };
 
-  const handleConvertQuoteToInvoice = (cot: Cotizacion) => {
-    onUpdateCotizacion({ ...cot, estado: 'aceptada' });
-
-    setEditingCotizacion(null);
-    setEditingFactura(null);
-    setSubTab('facturas');
-    setFormData({
-      cliente_id: cot.cliente_id,
-      numero: nextFacNumero,
-      ncf: '',
-      fecha: new Date().toISOString().split('T')[0],
-      validez_dias: 15,
-      aplica_itbis: cot.aplica_itbis,
-      notas: `Convertida desde ${cot.numero}. ${cot.notas || ''}`,
-      items: cot.items?.map((it: CotizacionItem) => ({ ...it, id: undefined })) || [
-        { descripcion: '', cantidad: 1, precio_unitario: 0, importe: 0 },
-      ],
-    });
-    setIsDocModalOpen(true);
-  };
-
-  const addLineItem = () => {
-    setFormData({
-      ...formData,
-      items: [
-        ...formData.items,
-        { id: `item-${Date.now()}`, descripcion: '', cantidad: 1, precio_unitario: 0, importe: 0 },
-      ],
-    });
-  };
-
-  const selectServiceForLine = (index: number, serviceId: string) => {
-    const s = state.servicios.find((serv: Servicio) => serv.id === serviceId);
+  const tomarDelCatalogo = (clave: string, servicioId: string) => {
+    const s = serviciosActivos.find((serv) => serv.id === servicioId);
     if (!s) return;
-    const updated = [...formData.items];
-    updated[index] = {
-      ...updated[index],
+    actualizarLinea(clave, {
       servicio_id: s.id,
       descripcion: s.nombre,
-      precio_unitario: s.precio_base,
-      importe: roundMoney(updated[index].cantidad * s.precio_base),
-    };
-    setFormData({ ...formData, items: updated });
-  };
-
-  const updateLineItem = (index: number, field: string, value: any) => {
-    const updated = [...formData.items];
-    const current = { ...updated[index], [field]: value };
-
-    if (field === 'cantidad' || field === 'precio_unitario') {
-      const qty = field === 'cantidad' ? Number(value) : Number(current.cantidad);
-      const price = field === 'precio_unitario' ? Number(value) : Number(current.precio_unitario);
-      current.importe = roundMoney((qty || 0) * (price || 0));
-    }
-
-    updated[index] = current;
-    setFormData({ ...formData, items: updated });
-  };
-
-  const removeLineItem = (index: number) => {
-    if (formData.items.length === 1) return;
-    setFormData({
-      ...formData,
-      items: formData.items.filter((_, i) => i !== index),
+      precio_unitario: Number(s.precio_base) || 0,
     });
   };
 
-  const subtotalCalculado = formData.items.reduce((sum: number, item) => sum + (item.importe || 0), 0);
-  const itbisCalculado = formData.aplica_itbis
-    ? roundMoney(subtotalCalculado * (state.settings.itbis_rate / 100))
-    : 0;
-  const totalCalculado = roundMoney(subtotalCalculado + itbisCalculado);
+  const agregarLinea = () =>
+    setFormData((prev) => ({ ...prev, items: [...prev.items, lineaVacia()] }));
 
-  const handleSubmitDocument = (e: React.FormEvent) => {
+  const quitarLinea = (clave: string) =>
+    setFormData((prev) =>
+      prev.items.length === 1
+        ? prev
+        : { ...prev, items: prev.items.filter((it) => it.clave !== clave) }
+    );
+
+  // ---------------------------------------------------------------
+  // Totales (previsualización; el servidor recalcula al guardar)
+  // ---------------------------------------------------------------
+  // Misma fórmula que aplica el servidor al guardar (ver utils/calculos.ts)
+  const totales = useMemo(
+    () =>
+      calcularTotalesDocumento(
+        formData.items,
+        formData.aplica_itbis,
+        state.settings.itbis_rate
+      ),
+    [formData.items, formData.aplica_itbis, state.settings.itbis_rate]
+  );
+
+  // ---------------------------------------------------------------
+  // Guardar
+  // ---------------------------------------------------------------
+  const handleSubmitDocument = async (e: React.FormEvent) => {
     e.preventDefault();
+
     if (!formData.cliente_id) {
-      alert('Por favor selecciona un cliente');
+      setErrorForm('Selecciona un cliente.');
       return;
     }
 
-    if (subTab === 'cotizaciones') {
-      const payload: Omit<Cotizacion, 'id' | 'created_at'> = {
-        cliente_id: formData.cliente_id,
-        numero: formData.numero || nextCotNumero,
-        fecha: formData.fecha,
-        validez_dias: formData.validez_dias,
-        estado: editingCotizacion ? editingCotizacion.estado : 'borrador',
-        subtotal: subtotalCalculado,
-        aplica_itbis: formData.aplica_itbis,
-        itbis: itbisCalculado,
-        total: totalCalculado,
-        notas: sanitizeString(formData.notas),
-        items: formData.items as CotizacionItem[],
-      };
+    const validaciones = [
+      validarFecha(formData.fecha, 'La fecha del documento'),
+      ...(subTab === 'cotizaciones'
+        ? [validarEntero(formData.validez_dias, 'La validez en días', 1, 365)]
+        : [validarNCF(formData.ncf)]),
+    ];
 
-      if (editingCotizacion) {
-        onUpdateCotizacion({ ...editingCotizacion, ...payload });
-      } else {
-        onAddCotizacion(payload);
+    const falloCabecera = primerError(...validaciones);
+    if (falloCabecera) {
+      setErrorForm(falloCabecera);
+      return;
+    }
+
+    // Cada línea debe tener descripción, cantidad y precio válidos
+    for (const [i, it] of formData.items.entries()) {
+      const descripcion = limpiarTexto(it.descripcion, 300);
+      if (!descripcion) {
+        setErrorForm(`La línea ${i + 1} necesita una descripción.`);
+        return;
       }
-    } else {
-      const payload: Omit<Factura, 'id' | 'created_at'> = {
-        cliente_id: formData.cliente_id,
-        numero: formData.numero || nextFacNumero,
-        ncf: sanitizeString(formData.ncf),
-        fecha: formData.fecha,
-        estado: editingFactura ? editingFactura.estado : 'pendiente',
-        subtotal: subtotalCalculado,
-        aplica_itbis: formData.aplica_itbis,
-        itbis: itbisCalculado,
-        total: totalCalculado,
-        monto_pagado: editingFactura ? editingFactura.monto_pagado : 0,
-        saldo_pendiente: editingFactura ? editingFactura.saldo_pendiente : totalCalculado,
-        notas: sanitizeString(formData.notas),
-        items: formData.items as FacturaItem[],
-      };
-
-      if (editingFactura) {
-        onUpdateFactura({ ...editingFactura, ...payload });
-      } else {
-        onAddFactura(payload);
+      const fallo = primerError(
+        validarCantidad(it.cantidad, `La cantidad de la línea ${i + 1}`),
+        validarMonto(it.precio_unitario, `El precio de la línea ${i + 1}`, { permitirCero: true })
+      );
+      if (fallo) {
+        setErrorForm(fallo);
+        return;
       }
     }
 
-    setIsDocModalOpen(false);
-  };
+    if (totales.total <= 0) {
+      setErrorForm('El documento no puede tener un total de cero.');
+      return;
+    }
 
-  const handleOpenPayment = (fac: Factura) => {
-    setPaymentFactura(fac);
-    setPaymentMonto(fac.saldo_pendiente);
-    setPaymentMetodo('efectivo');
-    setPaymentRef('');
-    setIsPaymentModalOpen(true);
-  };
+    const items: LineaDocumento[] = formData.items.map((it) => ({
+      servicio_id: it.servicio_id || null,
+      descripcion: limpiarTexto(it.descripcion, 300),
+      cantidad: it.cantidad,
+      precio_unitario: it.precio_unitario,
+      importe: it.importe,
+    }));
 
-  const handleConfirmPayment = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!paymentFactura || paymentMonto <= 0) return;
+    const notas = limpiarTextoMultilinea(formData.notas, 1000);
 
-    onRegisterPago({
-      factura_id: paymentFactura.id,
-      monto: paymentMonto,
-      metodo: paymentMetodo,
-      referencia: paymentRef,
+    const ok = await ejecutar(async () => {
+      if (subTab === 'cotizaciones') {
+        await onGuardarCotizacion(
+          {
+            id: editandoId ?? undefined,
+            cliente_id: formData.cliente_id,
+            fecha: formData.fecha,
+            validez_dias: formData.validez_dias,
+            aplica_itbis: formData.aplica_itbis,
+            notas,
+          },
+          items
+        );
+      } else {
+        await onGuardarFactura(
+          {
+            id: editandoId ?? undefined,
+            cliente_id: formData.cliente_id,
+            fecha: formData.fecha,
+            ncf: limpiarTexto(formData.ncf, 13).toUpperCase() || null,
+            aplica_itbis: formData.aplica_itbis,
+            notas,
+          },
+          items
+        );
+      }
     });
 
-    setIsPaymentModalOpen(false);
+    if (ok) setIsDocModalOpen(false);
   };
 
-  const filteredCotizaciones = state.cotizaciones.filter((c: Cotizacion) => {
-    const cli = state.clientes.find((cl: Cliente) => cl.id === c.cliente_id);
-    const q = search.toLowerCase();
-    return c.numero.toLowerCase().includes(q) || (cli && cli.nombre.toLowerCase().includes(q));
-  });
+  // ---------------------------------------------------------------
+  // Pagos
+  // ---------------------------------------------------------------
+  const abrirPago = (fac: Factura) => {
+    setPagoFacturaId(fac.id);
+    setPagoMonto(String(fac.saldo_pendiente));
+    setPagoMetodo('efectivo');
+    setPagoRef('');
+    setErrorPago('');
+  };
 
-  const filteredFacturas = state.facturas.filter((f: Factura) => {
-    const cli = state.clientes.find((cl: Cliente) => cl.id === f.cliente_id);
-    const q = search.toLowerCase();
-    return (
-      f.numero.toLowerCase().includes(q) ||
-      (f.ncf && f.ncf.toLowerCase().includes(q)) ||
-      (cli && cli.nombre.toLowerCase().includes(q))
+  const handleConfirmarPago = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pagoFactura) return;
+
+    const monto = aNumero(pagoMonto);
+    if (monto === null) {
+      setErrorPago('Escribe un monto válido.');
+      return;
+    }
+    if (monto <= 0) {
+      setErrorPago('El monto debe ser mayor que cero.');
+      return;
+    }
+    // El sobrepago se rechaza en vez de recortarse en silencio, que era lo
+    // que hacía desaparecer el excedente sin dejar rastro.
+    if (redondearDinero(monto) > pagoFactura.saldo_pendiente) {
+      setErrorPago(
+        `El monto supera el saldo pendiente (${formatCurrency(pagoFactura.saldo_pendiente)}).`
+      );
+      return;
+    }
+
+    const ok = await ejecutar(() =>
+      onRegistrarPago({
+        factura_id: pagoFactura.id,
+        monto: redondearDinero(monto),
+        metodo: pagoMetodo,
+        referencia: limpiarTexto(pagoRef, 120) || undefined,
+      })
     );
-  });
+
+    if (ok) setPagoFacturaId(null);
+  };
+
+  // ---------------------------------------------------------------
+  // Listados
+  // ---------------------------------------------------------------
+  const nombreCliente = (id: string) =>
+    state.clientes.find((c) => c.id === id)?.nombre ?? 'Cliente sin asignar';
+
+  const q = search.trim().toLowerCase();
+
+  const cotizacionesFiltradas = state.cotizaciones.filter(
+    (c) => !q || c.numero.toLowerCase().includes(q) || nombreCliente(c.cliente_id).toLowerCase().includes(q)
+  );
+
+  const facturasFiltradas = state.facturas.filter(
+    (f) =>
+      !q ||
+      f.numero.toLowerCase().includes(q) ||
+      (f.ncf ?? '').toLowerCase().includes(q) ||
+      nombreCliente(f.cliente_id).toLowerCase().includes(q)
+  );
+
+  const tituloModal = editandoId
+    ? `Editar ${subTab === 'cotizaciones' ? 'cotización' : 'factura'} ${numeroEditando}`
+    : `Nueva ${subTab === 'cotizaciones' ? 'cotización' : 'factura'}`;
 
   return (
     <div className="space-y-4 pb-20">
+      {/* Selector de tipo */}
       <div className="flex items-center bg-white border border-slate-200 p-1.5 rounded-2xl gap-1">
-        <button
-          onClick={() => setSubTab('cotizaciones')}
-          className={`flex-1 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 ${
-            subTab === 'cotizaciones'
-              ? 'bg-blue-600 text-white shadow-md shadow-blue-900/30'
-              : 'text-slate-400 hover:text-slate-700'
-          }`}
-        >
-          <FileText className="w-4 h-4" /> Cotizaciones ({state.cotizaciones.length})
-        </button>
-
-        <button
-          onClick={() => setSubTab('facturas')}
-          className={`flex-1 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 ${
-            subTab === 'facturas'
-              ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/20'
-              : 'text-slate-400 hover:text-slate-700'
-          }`}
-        >
-          <DollarSign className="w-4 h-4" /> Facturas ({state.facturas.length})
-        </button>
+        {(['cotizaciones', 'facturas'] as SubTab[]).map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setSubTab(tab)}
+            className={`flex-1 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 ${
+              subTab === tab
+                ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/20'
+                : 'text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            {tab === 'cotizaciones' ? (
+              <FileText className="w-4 h-4" />
+            ) : (
+              <DollarSign className="w-4 h-4" />
+            )}
+            {tab === 'cotizaciones' ? 'Cotizaciones' : 'Facturas'} (
+            {tab === 'cotizaciones' ? state.cotizaciones.length : state.facturas.length})
+          </button>
+        ))}
       </div>
 
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="relative flex-1">
           <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
-            type="text"
+            type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder={`Buscar en ${subTab}...`}
+            placeholder={`Buscar en ${subTab}…`}
             className="w-full bg-white shadow-sm border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-emerald-500"
           />
         </div>
 
         <button
-          onClick={subTab === 'cotizaciones' ? openCreateQuoteModal : openCreateInvoiceModal}
-          className={`flex items-center justify-center gap-2 font-semibold text-sm px-4 py-2.5 rounded-xl shadow-md transition-all text-white ${
-            subTab === 'cotizaciones'
-              ? 'bg-blue-600 hover:bg-blue-500 shadow-blue-900/30'
-              : 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-600/20'
-          }`}
+          onClick={() => abrirCreacion(subTab)}
+          className="flex items-center justify-center gap-2 font-semibold text-sm px-4 py-2.5 rounded-xl shadow-md transition-all text-white bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20"
         >
-          <Plus className="w-4 h-4" /> + Crear {subTab === 'cotizaciones' ? 'Cotización' : 'Factura'}
+          <Plus className="w-4 h-4" /> Crear {subTab === 'cotizaciones' ? 'cotización' : 'factura'}
         </button>
       </div>
 
-      {subTab === 'cotizaciones' && (
+      {/* Cotizaciones */}
+      {subTab === 'cotizaciones' ? (
         <div className="space-y-3">
-          {filteredCotizaciones.length === 0 ? (
+          {cotizacionesFiltradas.length === 0 ? (
             <div className="bg-slate-50 border border-slate-200 rounded-2xl p-8 text-center">
-              <FileText className="w-10 h-10 text-slate-600 mx-auto mb-2" />
-              <p className="text-slate-400 text-sm font-medium">
-                No hay cotizaciones registradas.
+              <FileText className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+              <p className="text-slate-500 text-sm font-medium">
+                {q ? 'No se encontraron cotizaciones.' : 'No hay cotizaciones registradas.'}
               </p>
-              <button
-                onClick={openCreateQuoteModal}
-                className="mt-3 text-sm text-emerald-600 font-semibold hover:underline"
-              >
-                + Crear la primera cotización
-              </button>
+              {!q ? (
+                <button
+                  onClick={() => abrirCreacion('cotizaciones')}
+                  className="mt-3 text-sm text-emerald-600 font-semibold hover:underline"
+                >
+                  + Crear la primera cotización
+                </button>
+              ) : null}
             </div>
           ) : (
-            filteredCotizaciones.map((cot: Cotizacion) => {
-              const cli = state.clientes.find((c: Cliente) => c.id === cot.cliente_id);
+            cotizacionesFiltradas.map((cot) => {
+              const cli = state.clientes.find((c) => c.id === cot.cliente_id);
               const whatsappUrl = generateWhatsappQuoteUrl(cot, cli, state.settings);
 
               return (
                 <div
                   key={cot.id}
-                  className="bg-white shadow-sm border border-slate-200 rounded-2xl p-4 transition-all hover:border-emerald-500 space-y-3"
+                  className="bg-white shadow-sm border border-slate-200 rounded-2xl p-4 transition-all hover:border-emerald-400 space-y-3"
                 >
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <div className="flex items-center gap-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-black text-slate-800 text-sm">{cot.numero}</span>
                         <span
                           className={`text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${
                             cot.estado === 'aceptada'
-                              ? 'bg-emerald-50 text-emerald-600 border-emerald-500/30'
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                               : cot.estado === 'enviada'
-                              ? 'bg-emerald-50 text-emerald-600 border-emerald-200'
+                              ? 'bg-slate-50 text-slate-600 border-slate-200'
                               : cot.estado === 'rechazada'
-                              ? 'bg-red-50 text-red-600 border-red-500/30'
-                              : 'bg-slate-100 text-slate-600 border-slate-600'
+                              ? 'bg-red-50 text-red-700 border-red-200'
+                              : cot.estado === 'vencida'
+                              ? 'bg-amber-50 text-amber-800 border-amber-200'
+                              : 'bg-slate-100 text-slate-600 border-slate-200'
                           }`}
                         >
                           {cot.estado}
                         </span>
                       </div>
-                      <p className="text-sm text-slate-600 font-semibold mt-0.5">
-                        {cli?.nombre || 'Cliente sin asignar'}
+                      <p className="text-sm text-slate-600 font-semibold mt-0.5 truncate">
+                        {cli?.nombre ?? 'Cliente sin asignar'}
                       </p>
-                      <p className="text-xs text-slate-400 flex items-center gap-1 mt-1">
+                      <p className="text-xs text-slate-500 flex items-center gap-1 mt-1">
                         <Calendar className="w-3 h-3 text-slate-400" />
-                        {formatDate(cot.fecha)} · Validez: {cot.validez_dias} días
+                        {formatDate(cot.fecha)} · Validez: {cot.validez_dias} días ·{' '}
+                        {cot.items?.length ?? 0}{' '}
+                        {(cot.items?.length ?? 0) === 1 ? 'línea' : 'líneas'}
                       </p>
                     </div>
 
-                    <div className="text-right">
-                      <span className="text-base font-black text-emerald-600 block">
+                    <div className="text-right shrink-0">
+                      <span className="text-base font-black text-emerald-700 block">
                         {formatCurrency(cot.total)}
                       </span>
-                      {cot.aplica_itbis && (
-                        <span className="text-[11px] text-slate-400">
+                      {cot.aplica_itbis ? (
+                        <span className="text-[11px] text-slate-500">
                           Incluye ITBIS ({formatCurrency(cot.itbis)})
                         </span>
-                      )}
+                      ) : null}
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-sm">
+                  <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100 flex-wrap">
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => onOpenPdfPreview('cotizacion', cot)}
-                        className="flex items-center gap-1 text-slate-600 hover:text-white bg-slate-100/60 hover:bg-slate-100 px-2.5 py-1 rounded-lg transition-colors text-xs"
+                        className="flex items-center gap-1 text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-2.5 py-1 rounded-lg transition-colors text-xs font-semibold"
                       >
                         <Eye className="w-3.5 h-3.5 text-emerald-600" /> PDF
                       </button>
@@ -407,30 +527,38 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
                         href={whatsappUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center gap-1 text-emerald-600 hover:text-emerald-300 bg-emerald-50 hover:bg-emerald-100 px-2.5 py-1 rounded-lg transition-colors text-xs font-semibold border border-emerald-500/30"
+                        className="flex items-center gap-1 text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 px-2.5 py-1 rounded-lg transition-colors text-xs font-semibold border border-emerald-200"
                       >
                         <Share2 className="w-3.5 h-3.5" /> WhatsApp
                       </a>
                     </div>
 
                     <div className="flex items-center gap-1.5">
-                      {cot.estado !== 'aceptada' && (
+                      {cot.estado !== 'aceptada' ? (
                         <button
-                          onClick={() => handleConvertQuoteToInvoice(cot)}
-                          className="flex items-center gap-1 text-amber-300 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 px-2.5 py-1 rounded-lg text-xs font-bold transition-all"
-                          title="Convertir a Factura"
+                          onClick={() => void ejecutar(() => onConvertirEnFactura(cot))}
+                          disabled={ejecutando}
+                          className="flex items-center gap-1 text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-2.5 py-1 rounded-lg text-xs font-bold transition-all disabled:opacity-50"
+                          title="Convertir en factura"
                         >
-                          <ArrowRightLeft className="w-3.5 h-3.5" /> Convertir a Factura
+                          <ArrowRightLeft className="w-3.5 h-3.5" /> Facturar
                         </button>
-                      )}
+                      ) : null}
 
                       <button
-                        onClick={() => {
-                          if (confirm(`¿Eliminar la cotización ${cot.numero}?`)) {
-                            onDeleteCotizacion(cot.id);
-                          }
-                        }}
-                        className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg hover:bg-slate-100/50"
+                        onClick={() => abrirEdicion(cot, 'cotizaciones')}
+                        className="p-1.5 text-slate-400 hover:text-emerald-700 rounded-lg hover:bg-slate-100"
+                        title="Editar cotización"
+                        aria-label={`Editar ${cot.numero}`}
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+
+                      <button
+                        onClick={() => void ejecutar(() => onDeleteCotizacion(cot))}
+                        className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg hover:bg-red-50"
+                        title="Eliminar cotización"
+                        aria-label={`Eliminar ${cot.numero}`}
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -441,82 +569,91 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
             })
           )}
         </div>
-      )}
+      ) : null}
 
-      {subTab === 'facturas' && (
+      {/* Facturas */}
+      {subTab === 'facturas' ? (
         <div className="space-y-3">
-          {filteredFacturas.length === 0 ? (
+          {facturasFiltradas.length === 0 ? (
             <div className="bg-slate-50 border border-slate-200 rounded-2xl p-8 text-center">
-              <DollarSign className="w-10 h-10 text-slate-600 mx-auto mb-2" />
-              <p className="text-slate-400 text-sm font-medium">No hay facturas registradas.</p>
-              <button
-                onClick={openCreateInvoiceModal}
-                className="mt-3 text-sm text-emerald-600 font-semibold hover:underline"
-              >
-                + Crear la primera factura
-              </button>
+              <DollarSign className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+              <p className="text-slate-500 text-sm font-medium">
+                {q ? 'No se encontraron facturas.' : 'No hay facturas registradas.'}
+              </p>
+              {!q ? (
+                <button
+                  onClick={() => abrirCreacion('facturas')}
+                  className="mt-3 text-sm text-emerald-600 font-semibold hover:underline"
+                >
+                  + Crear la primera factura
+                </button>
+              ) : null}
             </div>
           ) : (
-            filteredFacturas.map((fac: Factura) => {
-              const cli = state.clientes.find((c: Cliente) => c.id === fac.cliente_id);
+            facturasFiltradas.map((fac) => {
+              const cli = state.clientes.find((c) => c.id === fac.cliente_id);
               const whatsappUrl = generateWhatsappInvoiceUrl(fac, cli, state.settings);
 
               return (
                 <div
                   key={fac.id}
-                  className="bg-white shadow-sm border border-slate-200 rounded-2xl p-4 transition-all hover:border-emerald-500 space-y-3"
+                  className="bg-white shadow-sm border border-slate-200 rounded-2xl p-4 transition-all hover:border-emerald-400 space-y-3"
                 >
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <div className="flex items-center gap-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-black text-slate-800 text-sm">{fac.numero}</span>
-                        {fac.ncf && (
-                          <span className="text-[11px] font-mono bg-slate-100 text-slate-600 px-2 py-0.5 rounded">
+                        {fac.ncf ? (
+                          <span
+                            className="text-[11px] font-mono bg-slate-100 text-slate-600 px-2 py-0.5 rounded border border-slate-200"
+                            title={describirNCF(fac.ncf) ?? undefined}
+                          >
                             NCF: {fac.ncf}
                           </span>
-                        )}
+                        ) : null}
                         <span
                           className={`text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${
                             fac.estado === 'pagada'
-                              ? 'bg-emerald-50 text-emerald-600 border-emerald-500/30'
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                               : fac.estado === 'parcial'
-                              ? 'bg-amber-50 text-amber-600 border-amber-500/30'
-                              : 'bg-red-50 text-red-600 border-red-500/30'
+                              ? 'bg-amber-50 text-amber-800 border-amber-200'
+                              : 'bg-red-50 text-red-700 border-red-200'
                           }`}
                         >
                           {fac.estado}
                         </span>
                       </div>
-                      <p className="text-sm text-slate-600 font-semibold mt-0.5">
-                        {cli?.nombre || 'Cliente sin asignar'}
+                      <p className="text-sm text-slate-600 font-semibold mt-0.5 truncate">
+                        {cli?.nombre ?? 'Cliente sin asignar'}
                       </p>
-                      <p className="text-xs text-slate-400 flex items-center gap-1 mt-1">
+                      <p className="text-xs text-slate-500 flex items-center gap-1 mt-1">
                         <Calendar className="w-3 h-3 text-slate-400" />
-                        {formatDate(fac.fecha)}
+                        {formatDate(fac.fecha)} · {fac.items?.length ?? 0}{' '}
+                        {(fac.items?.length ?? 0) === 1 ? 'línea' : 'líneas'}
                       </p>
                     </div>
 
-                    <div className="text-right">
-                      <span className="text-base font-black text-emerald-600 block">
+                    <div className="text-right shrink-0">
+                      <span className="text-base font-black text-emerald-700 block">
                         {formatCurrency(fac.total)}
                       </span>
                       {fac.saldo_pendiente > 0 ? (
-                        <span className="text-xs text-amber-600 font-bold">
+                        <span className="text-xs text-amber-700 font-bold">
                           Debe: {formatCurrency(fac.saldo_pendiente)}
                         </span>
                       ) : (
-                        <span className="text-[11px] text-emerald-600 font-semibold flex items-center justify-end gap-1">
+                        <span className="text-[11px] text-emerald-700 font-semibold flex items-center justify-end gap-1">
                           <CheckCircle2 className="w-3 h-3" /> Saldada
                         </span>
                       )}
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-sm">
+                  <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100 flex-wrap">
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => onOpenPdfPreview('factura', fac)}
-                        className="flex items-center gap-1 text-slate-600 hover:text-white bg-slate-100/60 hover:bg-slate-100 px-2.5 py-1 rounded-lg transition-colors text-xs"
+                        className="flex items-center gap-1 text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-2.5 py-1 rounded-lg transition-colors text-xs font-semibold"
                       >
                         <Eye className="w-3.5 h-3.5 text-emerald-600" /> PDF
                       </button>
@@ -525,29 +662,36 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
                         href={whatsappUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center gap-1 text-emerald-600 hover:text-emerald-300 bg-emerald-50 hover:bg-emerald-100 px-2.5 py-1 rounded-lg transition-colors text-xs font-semibold border border-emerald-500/30"
+                        className="flex items-center gap-1 text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 px-2.5 py-1 rounded-lg transition-colors text-xs font-semibold border border-emerald-200"
                       >
                         <Share2 className="w-3.5 h-3.5" /> WhatsApp
                       </a>
                     </div>
 
                     <div className="flex items-center gap-1.5">
-                      {fac.saldo_pendiente > 0 && (
+                      {fac.saldo_pendiente > 0 ? (
                         <button
-                          onClick={() => handleOpenPayment(fac)}
-                          className="flex items-center gap-1 text-slate-950 bg-emerald-600 hover:bg-emerald-300 font-bold px-3 py-1 rounded-lg text-xs shadow-sm transition-all"
+                          onClick={() => abrirPago(fac)}
+                          className="flex items-center gap-1 text-white bg-emerald-600 hover:bg-emerald-700 font-bold px-3 py-1 rounded-lg text-xs shadow-sm transition-all"
                         >
-                          <DollarSign className="w-3.5 h-3.5" /> Registrar Pago
+                          <DollarSign className="w-3.5 h-3.5" /> Registrar pago
                         </button>
-                      )}
+                      ) : null}
 
                       <button
-                        onClick={() => {
-                          if (confirm(`¿Eliminar la factura ${fac.numero}?`)) {
-                            onDeleteFactura(fac.id);
-                          }
-                        }}
-                        className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg hover:bg-slate-100/50"
+                        onClick={() => abrirEdicion(fac, 'facturas')}
+                        className="p-1.5 text-slate-400 hover:text-emerald-700 rounded-lg hover:bg-slate-100"
+                        title="Editar factura"
+                        aria-label={`Editar ${fac.numero}`}
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+
+                      <button
+                        onClick={() => void ejecutar(() => onDeleteFactura(fac))}
+                        className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg hover:bg-red-50"
+                        title="Eliminar factura"
+                        aria-label={`Eliminar ${fac.numero}`}
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -558,49 +702,75 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
             })
           )}
         </div>
-      )}
+      ) : null}
 
       <button
-        onClick={subTab === 'cotizaciones' ? openCreateQuoteModal : openCreateInvoiceModal}
-        className={`fixed bottom-20 right-4 sm:right-8 z-30 w-14 h-14 text-white rounded-full shadow-2xl flex items-center justify-center transition-transform hover:scale-105 active:scale-95 ${
-          subTab === 'cotizaciones' ? 'bg-blue-600 shadow-blue-900/60' : 'bg-emerald-600 shadow-emerald-600/30'
-        }`}
-        title={`Crear ${subTab === 'cotizaciones' ? 'Cotización' : 'Factura'}`}
+        onClick={() => abrirCreacion(subTab)}
+        className="fixed bottom-20 right-4 sm:right-8 z-30 w-14 h-14 text-white rounded-full shadow-2xl flex items-center justify-center transition-transform hover:scale-105 active:scale-95 bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/30"
+        title={`Crear ${subTab === 'cotizaciones' ? 'cotización' : 'factura'}`}
+        aria-label={`Crear ${subTab === 'cotizaciones' ? 'cotización' : 'factura'}`}
       >
         <Plus className="w-7 h-7" />
       </button>
 
-      {isDocModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 overflow-y-auto">
-          <div className="bg-white border border-slate-200 rounded-2xl max-w-2xl w-full p-5 space-y-4 shadow-2xl max-h-[92vh] flex flex-col">
+      {/* Formulario de documento */}
+      {isDocModalOpen ? (
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-start sm:items-center justify-center p-3 overflow-y-auto">
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-2xl w-full p-5 space-y-4 shadow-2xl max-h-[92vh] flex flex-col my-4">
             <div className="flex items-center justify-between border-b border-slate-200 pb-3">
-              <h3 className="text-base font-bold text-slate-800">
-                {subTab === 'cotizaciones' ? 'Nueva Cotización' : 'Nueva Factura'}
-              </h3>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">{tituloModal}</h3>
+                {!editandoId ? (
+                  <p className="text-xs text-slate-500">
+                    El número se asigna automáticamente al guardar.
+                  </p>
+                ) : null}
+              </div>
               <button
                 onClick={() => setIsDocModalOpen(false)}
-                className="text-slate-400 hover:text-slate-700"
+                className="text-slate-400 hover:text-slate-700 p-1"
+                aria-label="Cerrar"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSubmitDocument} className="space-y-4 overflow-y-auto pr-1 flex-1">
+            <form
+              onSubmit={handleSubmitDocument}
+              className="space-y-4 overflow-y-auto pr-1 flex-1"
+              noValidate
+            >
+              {errorForm ? (
+                <div
+                  role="alert"
+                  className="bg-red-50 border border-red-200 text-red-700 text-sm p-3 rounded-xl flex items-start gap-2"
+                >
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{errorForm}</span>
+                </div>
+              ) : null}
+
+              {clientesActivos.length === 0 ? (
+                <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm p-3 rounded-xl">
+                  No tienes clientes registrados. Crea uno antes de emitir documentos.
+                </div>
+              ) : null}
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-semibold text-slate-600 mb-1">
+                  <label htmlFor="doc-cliente" className="block text-sm font-semibold text-slate-700 mb-1">
                     Cliente *
                   </label>
                   <select
-                    required
+                    id="doc-cliente"
                     value={formData.cliente_id}
                     onChange={(e) => setFormData({ ...formData, cliente_id: e.target.value })}
                     className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-emerald-500 font-medium"
                   >
-                    <option value="">-- Seleccionar Cliente --</option>
-                    {state.clientes.map((c: Cliente) => (
+                    <option value="">— Seleccionar cliente —</option>
+                    {clientesActivos.map((c) => (
                       <option key={c.id} value={c.id}>
-                        {c.nombre} {c.documento ? `(${c.documento})` : ''}
+                        {c.nombre}
                       </option>
                     ))}
                   </select>
@@ -608,75 +778,121 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="block text-sm font-semibold text-slate-600 mb-1">
-                      Número Correlativo
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={formData.numero}
-                      onChange={(e) => setFormData({ ...formData, numero: e.target.value })}
-                      className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 font-mono focus:outline-none focus:border-emerald-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-600 mb-1">
+                    <label htmlFor="doc-fecha" className="block text-sm font-semibold text-slate-700 mb-1">
                       Fecha
                     </label>
                     <input
+                      id="doc-fecha"
                       type="date"
-                      required
                       value={formData.fecha}
                       onChange={(e) => setFormData({ ...formData, fecha: e.target.value })}
                       className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-emerald-500"
                     />
                   </div>
+
+                  {subTab === 'cotizaciones' ? (
+                    <div>
+                      <label
+                        htmlFor="doc-validez"
+                        className="block text-sm font-semibold text-slate-700 mb-1"
+                      >
+                        Validez (días)
+                      </label>
+                      <input
+                        id="doc-validez"
+                        type="number"
+                        min={1}
+                        max={365}
+                        value={formData.validez_dias}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            validez_dias: sanearNumero(e.target.value, {
+                              min: 1,
+                              max: 365,
+                              decimales: 0,
+                              porDefecto: 15,
+                            }),
+                          })
+                        }
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-emerald-500"
+                      />
+                    </div>
+                  ) : (
+                    <div>
+                      <label htmlFor="doc-numero" className="block text-sm font-semibold text-slate-700 mb-1">
+                        Número
+                      </label>
+                      <input
+                        id="doc-numero"
+                        type="text"
+                        readOnly
+                        value={numeroEditando || 'Automático'}
+                        className="w-full bg-slate-100 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-500 font-mono cursor-not-allowed"
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
 
-              {subTab === 'facturas' && (
+              {subTab === 'facturas' ? (
                 <div>
-                  <label className="block text-sm font-semibold text-slate-600 mb-1">
-                    NCF (Número de Comprobante Fiscal — Opcional)
+                  <label htmlFor="doc-ncf" className="block text-sm font-semibold text-slate-700 mb-1">
+                    NCF (Número de Comprobante Fiscal){' '}
+                    <span className="font-normal text-slate-400">— opcional</span>
                   </label>
                   <input
+                    id="doc-ncf"
                     type="text"
+                    maxLength={11}
                     value={formData.ncf}
-                    onChange={(e) => setFormData({ ...formData, ncf: e.target.value })}
-                    placeholder="Ej: B0100000123"
-                    className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 font-mono uppercase focus:outline-none focus:border-emerald-500"
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        ncf: e.target.value.toUpperCase().replace(/[^BE0-9]/g, '').slice(0, 11),
+                      })
+                    }
+                    placeholder="B0100000123"
+                    className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 font-mono focus:outline-none focus:border-emerald-500"
                   />
+                  {describirNCF(formData.ncf) ? (
+                    <p className="text-xs text-emerald-700 font-semibold mt-1">
+                      Tipo: {describirNCF(formData.ncf)}
+                    </p>
+                  ) : null}
                 </div>
-              )}
+              ) : null}
 
+              {/* Líneas */}
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <h4 className="text-sm font-bold text-slate-600 uppercase tracking-wider">
-                    Líneas de Servicios / Productos
+                  <h4 className="text-sm font-bold text-slate-700 uppercase tracking-wider">
+                    Líneas de servicios o productos
                   </h4>
                   <button
                     type="button"
-                    onClick={addLineItem}
-                    className="text-sm font-semibold text-emerald-600 hover:underline flex items-center gap-1"
+                    onClick={agregarLinea}
+                    className="text-sm font-semibold text-emerald-700 hover:underline flex items-center gap-1"
                   >
-                    <Plus className="w-3.5 h-3.5" /> Agregar Línea
+                    <Plus className="w-3.5 h-3.5" /> Agregar línea
                   </button>
                 </div>
 
                 <div className="space-y-2">
                   {formData.items.map((item, idx) => (
                     <div
-                      key={idx}
-                      className="bg-white shadow-sm p-3 rounded-xl border border-slate-100 space-y-2"
+                      key={item.clave}
+                      className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2"
                     >
                       <div className="flex items-center justify-between gap-2">
                         <select
-                          onChange={(e) => selectServiceForLine(idx, e.target.value)}
-                          className="bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-xs text-slate-600 focus:outline-none"
+                          value={item.servicio_id ?? ''}
+                          onChange={(e) => tomarDelCatalogo(item.clave, e.target.value)}
+                          className="bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-xs text-slate-600 focus:outline-none focus:border-emerald-500 max-w-[70%]"
+                          aria-label={`Servicio del catálogo para la línea ${idx + 1}`}
                         >
-                          <option value="">-- Tomar del Catálogo --</option>
-                          {state.servicios.map((s: Servicio) => (
+                          <option value="">— Tomar del catálogo —</option>
+                          {serviciosActivos.map((s: Servicio) => (
                             <option key={s.id} value={s.id}>
                               {s.nombre} ({formatCurrency(s.precio_base)} / {s.unidad})
                             </option>
@@ -685,8 +901,11 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
 
                         <button
                           type="button"
-                          onClick={() => removeLineItem(idx)}
-                          className="text-slate-400 hover:text-red-600 p-1"
+                          onClick={() => quitarLinea(item.clave)}
+                          disabled={formData.items.length === 1}
+                          className="text-slate-400 hover:text-red-600 p-1 disabled:opacity-30 disabled:cursor-not-allowed"
+                          title="Quitar línea"
+                          aria-label={`Quitar línea ${idx + 1}`}
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -694,43 +913,60 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
 
                       <input
                         type="text"
-                        required
-                        placeholder="Descripción del servicio o artículo..."
+                        maxLength={300}
+                        placeholder="Descripción del servicio o artículo…"
                         value={item.descripcion}
-                        onChange={(e) => updateLineItem(idx, 'descripcion', e.target.value)}
-                        className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm text-slate-800 focus:outline-none"
+                        onChange={(e) => actualizarLinea(item.clave, { descripcion: e.target.value })}
+                        className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm text-slate-800 focus:outline-none focus:border-emerald-500"
+                        aria-label={`Descripción de la línea ${idx + 1}`}
                       />
 
                       <div className="grid grid-cols-3 gap-2 text-sm">
                         <div>
-                          <label className="block text-[11px] text-slate-400">Cantidad</label>
+                          <label className="block text-[11px] text-slate-500 mb-0.5">Cantidad</label>
                           <input
                             type="number"
-                            min="1"
+                            min={0.01}
                             step="any"
                             value={item.cantidad}
-                            onChange={(e) => updateLineItem(idx, 'cantidad', e.target.value)}
-                            className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-sm text-slate-800"
+                            onChange={(e) =>
+                              actualizarLinea(item.clave, {
+                                cantidad: sanearNumero(e.target.value, {
+                                  min: 0,
+                                  max: 100000,
+                                  decimales: 2,
+                                }),
+                              })
+                            }
+                            className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-sm text-slate-800 focus:outline-none focus:border-emerald-500"
                           />
                         </div>
                         <div>
-                          <label className="block text-[11px] text-slate-400">
-                            Precio Unit. (RD$)
+                          <label className="block text-[11px] text-slate-500 mb-0.5">
+                            Precio unit.
                           </label>
                           <input
                             type="number"
-                            min="0"
+                            min={0}
                             step="any"
                             value={item.precio_unitario}
                             onChange={(e) =>
-                              updateLineItem(idx, 'precio_unitario', e.target.value)
+                              actualizarLinea(item.clave, {
+                                precio_unitario: sanearNumero(e.target.value, {
+                                  min: 0,
+                                  max: 99999999,
+                                  decimales: 2,
+                                }),
+                              })
                             }
-                            className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-sm text-slate-800 font-bold"
+                            className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-sm text-slate-800 font-bold focus:outline-none focus:border-emerald-500"
                           />
                         </div>
                         <div>
-                          <label className="block text-[11px] text-slate-400">Importe</label>
-                          <div className="bg-slate-950 border border-slate-200 rounded-lg px-2.5 py-1 text-sm font-black text-emerald-600">
+                          <label className="block text-[11px] text-slate-500 mb-0.5">Importe</label>
+                          {/* Antes esta caja era `bg-slate-950`: un recuadro
+                              negro en medio del formulario claro. */}
+                          <div className="bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-sm font-black text-emerald-700">
                             {formatCurrency(item.importe)}
                           </div>
                         </div>
@@ -740,53 +976,52 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
                 </div>
               </div>
 
-              <div className="bg-slate-950/80 p-3.5 rounded-xl border border-slate-200 space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="flex items-center gap-2 text-sm font-semibold text-slate-600 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={formData.aplica_itbis}
-                      onChange={(e) =>
-                        setFormData({ ...formData, aplica_itbis: e.target.checked })
-                      }
-                      className="w-4 h-4 rounded text-emerald-600 bg-white border-slate-200 focus:ring-0"
-                    />
-                    Aplicar ITBIS ({state.settings.itbis_rate}%)
-                  </label>
-                </div>
+              {/* Totales */}
+              <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-2">
+                <label className="flex items-center gap-2 text-sm font-semibold text-slate-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formData.aplica_itbis}
+                    onChange={(e) => setFormData({ ...formData, aplica_itbis: e.target.checked })}
+                    className="w-4 h-4 rounded accent-emerald-600"
+                  />
+                  Aplicar ITBIS ({state.settings.itbis_rate}%)
+                </label>
 
                 <div className="border-t border-slate-200 pt-2 space-y-1 text-sm">
-                  <div className="flex justify-between text-slate-400">
+                  <div className="flex justify-between text-slate-600">
                     <span>Subtotal:</span>
-                    <span className="font-semibold text-slate-700">
-                      {formatCurrency(subtotalCalculado)}
+                    <span className="font-semibold text-slate-800">
+                      {formatCurrency(totales.subtotal)}
                     </span>
                   </div>
-                  {formData.aplica_itbis && (
-                    <div className="flex justify-between text-slate-400">
+                  {formData.aplica_itbis ? (
+                    <div className="flex justify-between text-slate-600">
                       <span>ITBIS ({state.settings.itbis_rate}%):</span>
-                      <span className="font-semibold text-slate-700">
-                        {formatCurrency(itbisCalculado)}
+                      <span className="font-semibold text-slate-800">
+                        {formatCurrency(totales.itbis)}
                       </span>
                     </div>
-                  )}
-                  <div className="flex justify-between text-sm font-black text-emerald-600 pt-1 border-t border-slate-200">
+                  ) : null}
+                  <div className="flex justify-between text-base font-black text-emerald-700 pt-1 border-t border-slate-200">
                     <span>TOTAL:</span>
-                    <span>{formatCurrency(totalCalculado)}</span>
+                    <span>{formatCurrency(totales.total)}</span>
                   </div>
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-slate-600 mb-1">
-                  Notas o Condiciones
+                <label htmlFor="doc-notas" className="block text-sm font-semibold text-slate-700 mb-1">
+                  Notas o condiciones
                 </label>
                 <textarea
+                  id="doc-notas"
                   rows={2}
+                  maxLength={1000}
                   value={formData.notas}
                   onChange={(e) => setFormData({ ...formData, notas: e.target.value })}
-                  placeholder="Términos de garantía o instrucciones de pago..."
-                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none"
+                  placeholder="Términos de garantía o instrucciones de pago…"
+                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-emerald-500"
                 />
               </div>
 
@@ -794,113 +1029,153 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsDocModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-sm font-semibold bg-white text-slate-600 hover:bg-slate-100"
+                  className="px-4 py-2 rounded-xl text-sm font-semibold bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-500 shadow-md shadow-emerald-600/20"
+                  disabled={ejecutando || clientesActivos.length === 0}
+                  className="px-5 py-2 rounded-xl text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:cursor-not-allowed shadow-md shadow-emerald-600/20 transition-colors"
                 >
-                  Guardar {subTab === 'cotizaciones' ? 'Cotización' : 'Factura'}
+                  {ejecutando
+                    ? 'Guardando…'
+                    : editandoId
+                    ? 'Guardar cambios'
+                    : `Guardar ${subTab === 'cotizaciones' ? 'cotización' : 'factura'}`}
                 </button>
               </div>
             </form>
           </div>
         </div>
-      )}
+      ) : null}
 
-      {isPaymentModalOpen && paymentFactura && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+      {/* Registro de pago */}
+      {pagoFactura ? (
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white border border-slate-200 rounded-2xl max-w-md w-full p-5 space-y-4 shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-200 pb-3">
               <div>
-                <h3 className="text-base font-bold text-slate-800">Registrar Pago de Factura</h3>
-                <p className="text-sm text-slate-400">{paymentFactura.numero}</p>
+                <h3 className="text-base font-bold text-slate-900">Registrar pago de factura</h3>
+                <p className="text-sm text-slate-500">{pagoFactura.numero}</p>
               </div>
-              <button onClick={() => setIsPaymentModalOpen(false)} className="text-slate-400">
+              <button
+                onClick={() => setPagoFacturaId(null)}
+                className="text-slate-400 hover:text-slate-700"
+                aria-label="Cerrar"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleConfirmPayment} className="space-y-3">
-              <div className="bg-white p-3 rounded-xl text-sm space-y-1">
-                <div className="flex justify-between text-slate-400">
-                  <span>Total Factura:</span>
-                  <span className="font-bold text-slate-700">
-                    {formatCurrency(paymentFactura.total)}
+            <form onSubmit={handleConfirmarPago} className="space-y-3" noValidate>
+              {errorPago ? (
+                <div
+                  role="alert"
+                  className="bg-red-50 border border-red-200 text-red-700 text-sm p-3 rounded-xl flex items-start gap-2"
+                >
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{errorPago}</span>
+                </div>
+              ) : null}
+
+              <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl text-sm space-y-1">
+                <div className="flex justify-between text-slate-600">
+                  <span>Total factura:</span>
+                  <span className="font-bold text-slate-800">
+                    {formatCurrency(pagoFactura.total)}
                   </span>
                 </div>
-                <div className="flex justify-between text-amber-600 font-bold">
-                  <span>Saldo Pendiente Actual:</span>
-                  <span>{formatCurrency(paymentFactura.saldo_pendiente)}</span>
+                <div className="flex justify-between text-slate-600">
+                  <span>Ya pagado:</span>
+                  <span className="font-semibold text-emerald-700">
+                    {formatCurrency(pagoFactura.monto_pagado)}
+                  </span>
+                </div>
+                <div className="flex justify-between text-amber-800 font-bold pt-1 border-t border-slate-200">
+                  <span>Saldo pendiente:</span>
+                  <span>{formatCurrency(pagoFactura.saldo_pendiente)}</span>
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-slate-600 mb-1">
-                  Monto a Abonar (RD$) *
+                <label htmlFor="pago-monto" className="block text-sm font-semibold text-slate-700 mb-1">
+                  Monto a abonar *
                 </label>
                 <input
+                  id="pago-monto"
                   type="number"
-                  min="1"
-                  max={paymentFactura.saldo_pendiente}
+                  min={0.01}
+                  max={pagoFactura.saldo_pendiente}
                   step="any"
-                  required
-                  value={paymentMonto}
-                  onChange={(e) => setPaymentMonto(parseFloat(e.target.value) || 0)}
-                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-black text-emerald-600 focus:outline-none"
+                  value={pagoMonto}
+                  onChange={(e) => {
+                    setPagoMonto(e.target.value);
+                    setErrorPago('');
+                  }}
+                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-black text-emerald-700 focus:outline-none focus:border-emerald-500"
                 />
+                <button
+                  type="button"
+                  onClick={() => setPagoMonto(String(pagoFactura.saldo_pendiente))}
+                  className="text-xs font-semibold text-emerald-700 hover:underline mt-1"
+                >
+                  Abonar el saldo completo
+                </button>
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-slate-600 mb-1">
-                  Método de Pago
+                <label htmlFor="pago-metodo" className="block text-sm font-semibold text-slate-700 mb-1">
+                  Método de pago
                 </label>
                 <select
-                  value={paymentMetodo}
-                  onChange={(e) => setPaymentMetodo(e.target.value as MetodoPago)}
-                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none"
+                  id="pago-metodo"
+                  value={pagoMetodo}
+                  onChange={(e) => setPagoMetodo(e.target.value as MetodoPago)}
+                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-emerald-500"
                 >
                   <option value="efectivo">Efectivo</option>
-                  <option value="transferencia">Transferencia Bancaria</option>
-                  <option value="tarjeta">Tarjeta de Crédito/Débito</option>
+                  <option value="transferencia">Transferencia bancaria</option>
+                  <option value="tarjeta">Tarjeta de crédito o débito</option>
                   <option value="otro">Otro</option>
                 </select>
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-slate-600 mb-1">
-                  Referencia / No. de Transacción (Opcional)
+                <label htmlFor="pago-ref" className="block text-sm font-semibold text-slate-700 mb-1">
+                  Referencia <span className="font-normal text-slate-400">— opcional</span>
                 </label>
                 <input
+                  id="pago-ref"
                   type="text"
-                  value={paymentRef}
-                  onChange={(e) => setPaymentRef(e.target.value)}
+                  maxLength={120}
+                  value={pagoRef}
+                  onChange={(e) => setPagoRef(e.target.value)}
                   placeholder="Ej: TR-891234 / Depósito Banreservas"
-                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none"
+                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-emerald-500"
                 />
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-200">
                 <button
                   type="button"
-                  onClick={() => setIsPaymentModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-sm font-semibold bg-white text-slate-600"
+                  onClick={() => setPagoFacturaId(null)}
+                  className="px-4 py-2 rounded-xl text-sm font-semibold bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl text-sm font-bold bg-emerald-600 hover:bg-emerald-500 text-white"
+                  disabled={ejecutando}
+                  className="px-4 py-2 rounded-xl text-sm font-bold bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white transition-colors"
                 >
-                  Confirmar Pago
+                  {ejecutando ? 'Registrando…' : 'Confirmar pago'}
                 </button>
               </div>
             </form>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 };

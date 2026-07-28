@@ -1,8 +1,16 @@
 import type { BusinessSettings, AppState } from '../types';
 
-const STORAGE_KEY = 'cotizaciones_facturas_prestamos_prod_v3';
+/**
+ * `localStorage` es sólo una caché de lectura para que la aplicación pinte
+ * algo mientras llegan los datos del servidor. La fuente de verdad es
+ * siempre Supabase.
+ *
+ * La caché va separada por usuario: antes, iniciar sesión con otra cuenta en
+ * el mismo navegador mezclaba los datos del usuario anterior con los nuevos.
+ */
+const PREFIJO_CACHE = 'jsoncotable:cache:';
 
-const DEFAULT_SETTINGS: BusinessSettings = {
+export const DEFAULT_SETTINGS: BusinessSettings = {
   business_name: 'Mi Negocio',
   phone: '',
   email: '',
@@ -11,52 +19,77 @@ const DEFAULT_SETTINGS: BusinessSettings = {
   logo_url: '',
   itbis_rate: 18,
   currency: 'RD$',
-  supabase_url: import.meta.env.VITE_SUPABASE_URL || 'https://hxeovachlapvfubcebha.supabase.co',
-  supabase_anon_key: import.meta.env.VITE_SUPABASE_ANON_KEY || '',
 };
 
+export const ESTADO_VACIO: AppState = {
+  settings: DEFAULT_SETTINGS,
+  clientes: [],
+  servicios: [],
+  cotizaciones: [],
+  facturas: [],
+  prestamos: [],
+  pagos: [],
+};
+
+function claveDe(userId: string): string {
+  return `${PREFIJO_CACHE}${userId}`;
+}
+
 export function getInitialState(): AppState {
-  const saved = localStorage.getItem(STORAGE_KEY);
-  if (saved) {
+  return ESTADO_VACIO;
+}
+
+export function leerCache(userId: string): AppState | null {
+  try {
+    const guardado = localStorage.getItem(claveDe(userId));
+    if (!guardado) return null;
+
+    const parsed = JSON.parse(guardado);
+    return {
+      settings: { ...DEFAULT_SETTINGS, ...parsed.settings },
+      clientes: parsed.clientes ?? [],
+      servicios: parsed.servicios ?? [],
+      cotizaciones: parsed.cotizaciones ?? [],
+      facturas: parsed.facturas ?? [],
+      prestamos: parsed.prestamos ?? [],
+      pagos: parsed.pagos ?? [],
+    };
+  } catch {
+    // Una caché corrupta no debe impedir usar la aplicación
+    return null;
+  }
+}
+
+/**
+ * Devuelve `false` si no se pudo guardar (típicamente por cuota agotada).
+ * Antes esto fallaba en silencio y la aplicación dejaba de persistir sin
+ * que nadie se enterara.
+ */
+export function guardarCache(userId: string, state: AppState): boolean {
+  try {
+    localStorage.setItem(claveDe(userId), JSON.stringify(state));
+    return true;
+  } catch {
     try {
-      const parsed = JSON.parse(saved);
-      return {
-        settings: { ...DEFAULT_SETTINGS, ...parsed.settings },
-        clientes: parsed.clientes || [],
-        servicios: parsed.servicios || [],
-        cotizaciones: parsed.cotizaciones || [],
-        facturas: parsed.facturas || [],
-        prestamos: parsed.prestamos || [],
-        pagos: parsed.pagos || [],
-      };
-    } catch (e) {
-      console.error('Failed to parse saved app state', e);
+      localStorage.removeItem(claveDe(userId));
+    } catch {
+      /* nada más que hacer */
     }
-  }
-
-  return {
-    settings: DEFAULT_SETTINGS,
-    clientes: [],
-    servicios: [],
-    cotizaciones: [],
-    facturas: [],
-    prestamos: [],
-    pagos: [],
-  };
-}
-
-export function saveStateToStorage(state: AppState) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  } catch (e) {
-    console.error('Error saving state to localStorage', e);
+    return false;
   }
 }
 
-export function clearStateFromStorage() {
+export function limpiarCache(userId?: string) {
   try {
-    localStorage.removeItem(STORAGE_KEY);
-  } catch (e) {
-    console.error('Error clearing localStorage', e);
+    if (userId) {
+      localStorage.removeItem(claveDe(userId));
+      return;
+    }
+    // Sin usuario concreto: purgar toda la caché de la aplicación
+    Object.keys(localStorage)
+      .filter((k) => k.startsWith(PREFIJO_CACHE))
+      .forEach((k) => localStorage.removeItem(k));
+  } catch {
+    /* almacenamiento no disponible */
   }
 }

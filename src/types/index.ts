@@ -2,12 +2,21 @@ export type CategoriaServicio = 'plomería' | 'electricidad' | 'pintura' | 'otro
 export type UnidadServicio = 'hora' | 'unidad' | 'm²' | 'servicio';
 
 export type EstadoCotizacion = 'borrador' | 'enviada' | 'aceptada' | 'rechazada' | 'vencida';
-export type EstadoFactura = 'pendiente' | 'parcial' | 'pagada';
+export type EstadoFactura = 'pendiente' | 'parcial' | 'pagada' | 'anulada';
 export type MetodoPago = 'efectivo' | 'transferencia' | 'tarjeta' | 'otro';
 
 export type FrecuenciaPrestamo = 'semanal' | 'quincenal' | 'mensual';
 export type EstadoPrestamo = 'activo' | 'saldado' | 'atrasado';
-export type EstadoCuota = 'pendiente' | 'pagada' | 'atrasada';
+export type EstadoCuota = 'pendiente' | 'parcial' | 'pagada' | 'atrasada';
+
+export interface Organizacion {
+  id: string;
+  nombre: string;
+  rnc: string | null;
+  plan: 'prueba' | 'basico' | 'pro';
+  estado: 'activa' | 'suspendida' | 'cancelada';
+  created_at: string;
+}
 
 export interface Cliente {
   id: string;
@@ -17,6 +26,7 @@ export interface Cliente {
   direccion: string;
   documento: string; // RNC o Cédula
   notas: string;
+  activo: boolean;
   created_at: string;
 }
 
@@ -31,20 +41,23 @@ export interface Servicio {
   created_at: string;
 }
 
-export interface CotizacionItem {
+/** Línea de documento tal como la edita el formulario, antes de guardarse. */
+export interface LineaDocumento {
   id?: string;
-  cotizacion_id?: string;
-  servicio_id?: string;
+  servicio_id?: string | null;
   descripcion: string;
   cantidad: number;
   precio_unitario: number;
   importe: number;
 }
 
+export type CotizacionItem = LineaDocumento;
+export type FacturaItem = LineaDocumento;
+
 export interface Cotizacion {
   id: string;
   cliente_id: string;
-  numero: string; // e.g. COT-2026-0001
+  numero: string; // COT-2026-0001, asignado por la base de datos
   fecha: string;
   validez_dias: number;
   estado: EstadoCotizacion;
@@ -55,25 +68,14 @@ export interface Cotizacion {
   notas: string;
   created_at: string;
   items?: CotizacionItem[];
-  cliente?: Cliente;
-}
-
-export interface FacturaItem {
-  id?: string;
-  factura_id?: string;
-  servicio_id?: string;
-  descripcion: string;
-  cantidad: number;
-  precio_unitario: number;
-  importe: number;
 }
 
 export interface Factura {
   id: string;
   cliente_id: string;
-  cotizacion_id?: string;
-  numero: string; // e.g. FAC-2026-0001
-  ncf?: string;
+  cotizacion_id?: string | null;
+  numero: string; // FAC-2026-0001, asignado por la base de datos
+  ncf?: string | null;
   fecha: string;
   estado: EstadoFactura;
   subtotal: number;
@@ -85,19 +87,18 @@ export interface Factura {
   notas: string;
   created_at: string;
   items?: FacturaItem[];
-  cliente?: Cliente;
   pagos?: Pago[];
 }
 
 export interface Pago {
   id: string;
-  factura_id?: string;
-  prestamo_id?: string;
-  cuota_id?: string;
+  factura_id?: string | null;
+  prestamo_id?: string | null;
+  cuota_id?: string | null;
   monto: number;
   fecha: string;
   metodo: MetodoPago;
-  referencia?: string;
+  referencia?: string | null;
   created_at: string;
 }
 
@@ -124,10 +125,14 @@ export interface Prestamo {
   estado: EstadoPrestamo;
   created_at: string;
   cuotas?: Cuota[];
-  cliente?: Cliente;
   pagos?: Pago[];
 }
 
+/**
+ * Perfil comercial del negocio. Se guarda en Supabase
+ * (`configuracion_negocio`), no en el navegador: cambiar de dispositivo no
+ * puede hacer perder el logo, el RNC ni la tasa de ITBIS.
+ */
 export interface BusinessSettings {
   business_name: string;
   phone: string;
@@ -137,8 +142,6 @@ export interface BusinessSettings {
   logo_url: string;
   itbis_rate: number; // Por defecto 18%
   currency: string; // RD$
-  supabase_url?: string;
-  supabase_anon_key?: string;
 }
 
 export interface AppState {

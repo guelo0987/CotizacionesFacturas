@@ -15,8 +15,11 @@ export default defineConfig({
         name: 'Cotizaciones · Facturas · Préstamos',
         short_name: 'Cotizaciones',
         description: 'Sistema de Gestión Móvil para Cotizaciones, Facturas, Pagos y Préstamos',
-        theme_color: '#0f172a',
-        background_color: '#0f172a',
+        // Deben coincidir con el <meta name="theme-color"> de index.html.
+        // Estaban en #0f172a (oscuro) y la pantalla de arranque parpadeaba
+        // en negro antes de mostrar la aplicación, que es clara.
+        theme_color: '#f8fafc',
+        background_color: '#f8fafc',
         display: 'standalone',
         orientation: 'portrait',
         start_url: '/',

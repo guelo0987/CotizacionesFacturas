@@ -11,7 +11,6 @@ import type { SolicitudApertura } from '../App';
 import { formatCurrency, formatDate } from '../utils/sanitizer';
 import { calcularImporteLinea, calcularTotalesDocumento } from '../utils/calculos';
 import {
-  aNumero,
   limpiarTexto,
   limpiarTextoMultilinea,
   primerError,
@@ -24,8 +23,8 @@ import {
   describirNCF,
   validarEntero,
 } from '../utils/validacion';
+import { CampoMoneda } from './campos/CampoMoneda';
 import { useAccionAsync } from '../hooks/useAccionAsync';
-import { generateWhatsappQuoteUrl, generateWhatsappInvoiceUrl } from '../utils/whatsapp';
 import {
   AlertCircle,
   ArrowRightLeft,
@@ -115,7 +114,7 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
   });
 
   const [pagoFacturaId, setPagoFacturaId] = useState<string | null>(null);
-  const [pagoMonto, setPagoMonto] = useState('');
+  const [pagoMonto, setPagoMonto] = useState<number | null>(null);
   const [pagoMetodo, setPagoMetodo] = useState<MetodoPago>('efectivo');
   const [pagoRef, setPagoRef] = useState('');
   const [errorPago, setErrorPago] = useState('');
@@ -334,7 +333,7 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
   // ---------------------------------------------------------------
   const abrirPago = (fac: Factura) => {
     setPagoFacturaId(fac.id);
-    setPagoMonto(String(fac.saldo_pendiente));
+    setPagoMonto(fac.saldo_pendiente);
     setPagoMetodo('efectivo');
     setPagoRef('');
     setErrorPago('');
@@ -344,7 +343,7 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
     e.preventDefault();
     if (!pagoFactura) return;
 
-    const monto = aNumero(pagoMonto);
+    const monto = pagoMonto;
     if (monto === null) {
       setErrorPago('Escribe un monto válido.');
       return;
@@ -464,7 +463,6 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
           ) : (
             cotizacionesFiltradas.map((cot) => {
               const cli = state.clientes.find((c) => c.id === cot.cliente_id);
-              const whatsappUrl = generateWhatsappQuoteUrl(cot, cli, state.settings);
 
               return (
                 <div
@@ -523,14 +521,14 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
                         <Eye className="w-3.5 h-3.5 text-emerald-600" /> PDF
                       </button>
 
-                      <a
-                        href={whatsappUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                      {/* Compartir abre la vista previa: el PDF que se envía
+                          se genera desde ahí, no desde un enlace de texto. */}
+                      <button
+                        onClick={() => onOpenPdfPreview('cotizacion', cot)}
                         className="flex items-center gap-1 text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 px-2.5 py-1 rounded-lg transition-colors text-xs font-semibold border border-emerald-200"
                       >
                         <Share2 className="w-3.5 h-3.5" /> WhatsApp
-                      </a>
+                      </button>
                     </div>
 
                     <div className="flex items-center gap-1.5">
@@ -592,7 +590,6 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
           ) : (
             facturasFiltradas.map((fac) => {
               const cli = state.clientes.find((c) => c.id === fac.cliente_id);
-              const whatsappUrl = generateWhatsappInvoiceUrl(fac, cli, state.settings);
 
               return (
                 <div
@@ -658,14 +655,14 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
                         <Eye className="w-3.5 h-3.5 text-emerald-600" /> PDF
                       </button>
 
-                      <a
-                        href={whatsappUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                      {/* Compartir abre la vista previa: el PDF que se envía
+                          se genera desde ahí, no desde un enlace de texto. */}
+                      <button
+                        onClick={() => onOpenPdfPreview('factura', fac)}
                         className="flex items-center gap-1 text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 px-2.5 py-1 rounded-lg transition-colors text-xs font-semibold border border-emerald-200"
                       >
                         <Share2 className="w-3.5 h-3.5" /> WhatsApp
-                      </a>
+                      </button>
                     </div>
 
                     <div className="flex items-center gap-1.5">
@@ -931,10 +928,13 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
                             value={item.cantidad}
                             onChange={(e) =>
                               actualizarLinea(item.clave, {
+                                // `porDefecto: 1` para que vaciar la casilla
+                                // no deje un 0 pegado que hay que borrar.
                                 cantidad: sanearNumero(e.target.value, {
                                   min: 0,
                                   max: 100000,
                                   decimales: 2,
+                                  porDefecto: 1,
                                 }),
                               })
                             }
@@ -945,21 +945,13 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
                           <label className="block text-[11px] text-slate-500 mb-0.5">
                             Precio unit.
                           </label>
-                          <input
-                            type="number"
-                            min={0}
-                            step="any"
+                          <CampoMoneda
                             value={item.precio_unitario}
-                            onChange={(e) =>
-                              actualizarLinea(item.clave, {
-                                precio_unitario: sanearNumero(e.target.value, {
-                                  min: 0,
-                                  max: 99999999,
-                                  decimales: 2,
-                                }),
-                              })
+                            onChange={(precio) =>
+                              actualizarLinea(item.clave, { precio_unitario: precio ?? 0 })
                             }
-                            className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-sm text-slate-800 font-bold focus:outline-none focus:border-emerald-500"
+                            aria-label={`Precio unitario de la línea ${idx + 1}`}
+                            className="!pl-10 !py-1 !rounded-lg"
                           />
                         </div>
                         <div>
@@ -1102,22 +1094,18 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
                 <label htmlFor="pago-monto" className="block text-sm font-semibold text-slate-700 mb-1">
                   Monto a abonar *
                 </label>
-                <input
+                <CampoMoneda
                   id="pago-monto"
-                  type="number"
-                  min={0.01}
-                  max={pagoFactura.saldo_pendiente}
-                  step="any"
                   value={pagoMonto}
-                  onChange={(e) => {
-                    setPagoMonto(e.target.value);
+                  onChange={(monto) => {
+                    setPagoMonto(monto);
                     setErrorPago('');
                   }}
-                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-black text-emerald-700 focus:outline-none focus:border-emerald-500"
+                  className="font-black"
                 />
                 <button
                   type="button"
-                  onClick={() => setPagoMonto(String(pagoFactura.saldo_pendiente))}
+                  onClick={() => setPagoMonto(pagoFactura.saldo_pendiente)}
                   className="text-xs font-semibold text-emerald-700 hover:underline mt-1"
                 >
                   Abonar el saldo completo

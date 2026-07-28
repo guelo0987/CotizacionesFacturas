@@ -2,8 +2,14 @@ import React, { useState } from 'react';
 import type { Cotizacion, Factura, Cliente, BusinessSettings } from '../types';
 import { formatCurrency, formatDate, formatDocumento, formatTelefono } from '../utils/sanitizer';
 import { describirNCF } from '../utils/validacion';
-import { generatePdfFromElement, printDocumentElement } from '../utils/pdfGenerator';
-import { generateWhatsappQuoteUrl, generateWhatsappInvoiceUrl } from '../utils/whatsapp';
+import {
+  compartirArchivo,
+  descargarArchivo,
+  generarPdfFile,
+  generatePdfFromElement,
+  printDocumentElement,
+} from '../utils/pdfGenerator';
+import { construirUrl, mensajeDocumento } from '../utils/whatsapp';
 import { useFeedback, mensajeDeError } from './feedback/contexto';
 import { FileDown, Printer, Share2, X } from 'lucide-react';
 
@@ -16,8 +22,9 @@ interface PdfModalProps {
 }
 
 export const PdfModal: React.FC<PdfModalProps> = ({ type, doc, cliente, settings, onClose }) => {
-  const { error: avisarError } = useFeedback();
+  const { error: avisarError, info: avisarInfo } = useFeedback();
   const [generando, setGenerando] = useState(false);
+  const [compartiendo, setCompartiendo] = useState(false);
 
   const isInvoice = type === 'factura';
   const invoice = isInvoice ? (doc as Factura) : null;
@@ -27,10 +34,6 @@ export const PdfModal: React.FC<PdfModalProps> = ({ type, doc, cliente, settings
   const filename = `${doc.numero}.pdf`;
   const items = doc.items ?? [];
 
-  const whatsappUrl = isInvoice
-    ? generateWhatsappInvoiceUrl(invoice!, cliente, settings)
-    : generateWhatsappQuoteUrl(quote!, cliente, settings);
-
   const descargar = async () => {
     setGenerando(true);
     try {
@@ -39,6 +42,37 @@ export const PdfModal: React.FC<PdfModalProps> = ({ type, doc, cliente, settings
       avisarError(mensajeDeError(e));
     } finally {
       setGenerando(false);
+    }
+  };
+
+  /**
+   * Comparte el PDF, no un enlace.
+   *
+   * El destinatario no se elige aquí: se entrega el archivo a la hoja de
+   * compartir del sistema y es el propio WhatsApp quien muestra la lista de
+   * contactos. En escritorio, donde no se pueden compartir archivos, se
+   * descarga el PDF y se abre WhatsApp Web con el resumen para adjuntarlo.
+   */
+  const compartir = async () => {
+    setCompartiendo(true);
+    try {
+      const archivo = await generarPdfFile(documentElementId, filename);
+      const texto = mensajeDocumento(type, doc, cliente, settings);
+      const titulo = `${isInvoice ? 'Factura' : 'Cotización'} ${doc.numero}`;
+
+      const resultado = await compartirArchivo(archivo, titulo, texto);
+
+      if (resultado === 'sin-soporte') {
+        descargarArchivo(archivo);
+        window.open(construirUrl(texto, cliente?.telefono), '_blank', 'noopener,noreferrer');
+        avisarInfo(
+          'Este navegador no puede enviar archivos directamente: descargamos el PDF y abrimos WhatsApp para que lo adjuntes.'
+        );
+      }
+    } catch (e) {
+      avisarError(mensajeDeError(e));
+    } finally {
+      setCompartiendo(false);
     }
   };
 
@@ -77,14 +111,13 @@ export const PdfModal: React.FC<PdfModalProps> = ({ type, doc, cliente, settings
               <Printer className="w-4 h-4 text-slate-500" /> Imprimir
             </button>
 
-            <a
-              href={whatsappUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 font-semibold text-xs px-3 py-1.5 rounded-xl transition-all"
+            <button
+              onClick={compartir}
+              disabled={compartiendo || generando}
+              className="flex items-center gap-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 disabled:opacity-50 disabled:cursor-not-allowed font-semibold text-xs px-3 py-1.5 rounded-xl transition-all"
             >
-              <Share2 className="w-4 h-4" /> WhatsApp
-            </a>
+              <Share2 className="w-4 h-4" /> {compartiendo ? 'Preparando…' : 'WhatsApp'}
+            </button>
 
             <button
               onClick={onClose}
@@ -96,13 +129,17 @@ export const PdfModal: React.FC<PdfModalProps> = ({ type, doc, cliente, settings
           </div>
         </div>
 
-        <div className="overflow-y-auto pr-1 flex-1 bg-slate-100 p-2 sm:p-4 rounded-xl border border-slate-200">
+        {/* El documento tiene un ancho fijo y no depende de puntos de
+            corte responsivos: así el PDF y la impresión salen idénticos
+            desde un móvil o desde un ordenador. En pantallas estrechas la
+            vista previa se desplaza en horizontal. */}
+        <div className="overflow-auto pr-1 flex-1 bg-slate-100 p-2 sm:p-4 rounded-xl border border-slate-200">
           <div
             id={documentElementId}
-            className="printable-pdf bg-white text-slate-900 p-6 sm:p-8 rounded-lg shadow-sm font-sans max-w-2xl mx-auto space-y-6"
+            className="printable-pdf bg-white text-slate-900 p-8 rounded-lg shadow-sm font-sans mx-auto space-y-6"
           >
             {/* Cabecera */}
-            <div className="flex flex-col sm:flex-row justify-between items-start border-b border-slate-200 pb-5 gap-4">
+            <div className="flex justify-between items-start border-b border-slate-200 pb-5 gap-4">
               <div className="space-y-1.5">
                 {settings.logo_url ? (
                   <img
@@ -126,7 +163,7 @@ export const PdfModal: React.FC<PdfModalProps> = ({ type, doc, cliente, settings
                 {settings.email ? <p className="text-xs text-slate-600">{settings.email}</p> : null}
               </div>
 
-              <div className="text-left sm:text-right space-y-1 bg-slate-50 p-3 rounded-lg border border-slate-200 min-w-[200px]">
+              <div className="text-right space-y-1 bg-slate-50 p-3 rounded-lg border border-slate-200 min-w-[200px]">
                 <h2 className="text-lg font-black text-slate-900 uppercase tracking-wide">
                   {isInvoice ? 'FACTURA DE VENTA' : 'COTIZACIÓN'}
                 </h2>
@@ -208,7 +245,7 @@ export const PdfModal: React.FC<PdfModalProps> = ({ type, doc, cliente, settings
             </div>
 
             {/* Totales */}
-            <div className="flex flex-col sm:flex-row justify-between items-start pt-4 border-t border-slate-200 gap-4">
+            <div className="flex justify-between items-start pt-4 border-t border-slate-200 gap-4">
               <div className="text-xs text-slate-600 max-w-xs space-y-1">
                 <div className="font-bold text-slate-800">Términos y notas:</div>
                 <p className="italic whitespace-pre-line">
@@ -216,7 +253,7 @@ export const PdfModal: React.FC<PdfModalProps> = ({ type, doc, cliente, settings
                 </p>
               </div>
 
-              <div className="w-full sm:w-64 space-y-1.5 text-xs bg-slate-50 p-3 rounded-lg border border-slate-200">
+              <div className="w-64 shrink-0 space-y-1.5 text-xs bg-slate-50 p-3 rounded-lg border border-slate-200">
                 <div className="flex justify-between text-slate-700">
                   <span>Subtotal:</span>
                   <span className="font-semibold">{formatCurrency(doc.subtotal)}</span>

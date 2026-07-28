@@ -58,6 +58,35 @@ export function formatDate(dateString: string | undefined | null): string {
   }
 }
 
+/**
+ * Suma meses de calendario a una fecha ISO (YYYY-MM-DD), en UTC.
+ *
+ * El día se ajusta al último del mes cuando no existe: el 31 de enero más
+ * un mes es el 28 de febrero, no el 3 de marzo. Es la misma regla que
+ * aplica PostgreSQL al sumar un `interval '1 month'`, que es quien genera
+ * el calendario definitivo.
+ */
+export function addMonthsToDate(dateString: string, months: number): string {
+  const partes = dateString ? dateString.split('T')[0].split('-') : [];
+  const hoy = new Date();
+
+  const anio = partes.length === 3 ? Number(partes[0]) : hoy.getUTCFullYear();
+  const mes = partes.length === 3 ? Number(partes[1]) : hoy.getUTCMonth() + 1;
+  const dia = partes.length === 3 ? Number(partes[2]) : hoy.getUTCDate();
+
+  if (!Number.isFinite(anio) || !Number.isFinite(mes) || !Number.isFinite(dia)) {
+    return dateString;
+  }
+
+  const primeroDelMes = new Date(Date.UTC(anio, mes - 1 + months, 1));
+  const ultimoDia = new Date(
+    Date.UTC(primeroDelMes.getUTCFullYear(), primeroDelMes.getUTCMonth() + 1, 0)
+  ).getUTCDate();
+
+  primeroDelMes.setUTCDate(Math.min(dia, ultimoDia));
+  return primeroDelMes.toISOString().split('T')[0];
+}
+
 /** Suma días a una fecha ISO (YYYY-MM-DD) trabajando siempre en UTC. */
 export function addDaysToDate(dateString: string, days: number): string {
   const parts = dateString ? dateString.split('-') : [];

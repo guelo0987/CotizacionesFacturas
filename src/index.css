@@ -37,6 +37,18 @@
   border-color: #cbd5e1;
 }
 
+/* ---------------------------------------------------------------------
+   Documento imprimible (cotización / factura)
+   ---------------------------------------------------------------------
+   Ancho fijo a propósito: el PDF y la impresión salen del mismo nodo del
+   DOM que la vista previa, así que si el documento cambiara de forma según
+   el ancho de la pantalla, la misma factura llegaría distinta al cliente
+   según se enviara desde un móvil o desde un ordenador.
+   ------------------------------------------------------------------- */
+.printable-pdf {
+  width: 720px;
+}
+
 /* Custom Soft Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
@@ -56,9 +68,10 @@
 /* ---------------------------------------------------------------------
    Impresión
    ---------------------------------------------------------------------
-   `printDocumentElement` marca el documento con `.zona-impresion` y el
-   body con `.imprimiendo`. Así se imprime el elemento real, conservando
-   sus estilos, en vez de copiar el HTML a otra ventana.
+   `printDocumentElement` marca el documento con `.zona-impresion`, cada
+   uno de sus ancestros con `.ruta-impresion` y el body con `.imprimiendo`.
+   Así se imprime el elemento real —mismos estilos, mismo logo, mismos
+   colores que la vista previa— en vez de copiar el HTML a otra ventana.
    ------------------------------------------------------------------- */
 @media print {
   @page {
@@ -68,57 +81,75 @@
 
   body {
     background: #fff !important;
-    color: #000 !important;
   }
 
   .no-print {
     display: none !important;
   }
 
-  /* Ocultar toda la aplicación salvo la zona a imprimir */
-  body.imprimiendo > * {
+  /* Ocultar toda la aplicación salvo la rama que lleva al documento */
+  body.imprimiendo > *:not(.ruta-impresion):not(.zona-impresion) {
     display: none !important;
   }
 
-  body.imprimiendo .zona-impresion,
-  body.imprimiendo .zona-impresion * {
-    visibility: visible !important;
-  }
-
-  body.imprimiendo .zona-impresion {
+  /* Los contenedores intermedios (fondo difuminado, modal, caja con scroll)
+     dejan de ser una ventana flotante y pasan a ser simples envoltorios. */
+  body.imprimiendo .ruta-impresion {
     display: block !important;
-    position: absolute !important;
-    inset: 0 auto auto 0;
-    width: 100% !important;
+    position: static !important;
+    inset: auto !important;
+    overflow: visible !important;
+    width: auto !important;
     max-width: none !important;
+    height: auto !important;
+    max-height: none !important;
     margin: 0 !important;
     padding: 0 !important;
     border: 0 !important;
     border-radius: 0 !important;
     box-shadow: none !important;
     background: #fff !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
   }
 
-  /* Los contenedores intermedios (modal, backdrop) deben dejar ver la zona */
-  body.imprimiendo .zona-impresion,
-  body.imprimiendo :has(> .zona-impresion) {
+  /* Dentro de cada envoltorio sólo sigue visible lo que lleva al documento */
+  body.imprimiendo .ruta-impresion > *:not(.ruta-impresion):not(.zona-impresion) {
+    display: none !important;
+  }
+
+  /* En papel el documento ocupa el ancho útil de la página, pero conserva
+     su composición de dos columnas: es el mismo nodo, sin puntos de corte
+     responsivos de por medio. */
+  body.imprimiendo .zona-impresion {
     display: block !important;
-  }
-
-  /* Colores planos: los fondos oscuros gastan tinta y salen ilegibles */
-  .zona-impresion table thead tr {
-    background: #e2e8f0 !important;
-    color: #0f172a !important;
-  }
-
-  .zona-impresion * {
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
     box-shadow: none !important;
   }
 
-  /* No cortar filas de tabla a mitad de página */
+  /* Imprimir los fondos y colores tal cual se ven en pantalla: sin esto el
+     navegador descarta el encabezado oscuro de la tabla y los acentos
+     verdes, y el papel no se parece a la vista previa. */
+  body.imprimiendo .zona-impresion,
+  body.imprimiendo .zona-impresion * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* No partir filas, imágenes ni bloques a mitad de página */
   .zona-impresion tr,
-  .zona-impresion img {
+  .zona-impresion img,
+  .zona-impresion thead,
+  .zona-impresion table > div {
     break-inside: avoid;
     page-break-inside: avoid;
+  }
+
+  .zona-impresion img {
+    max-width: 100% !important;
   }
 }

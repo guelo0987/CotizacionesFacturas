@@ -419,6 +419,7 @@ export const supabaseDataService = {
         tasa_interes: datos.tasa_interes,
         num_cuotas: datos.num_cuotas,
         frecuencia: datos.frecuencia,
+        modalidad_interes: datos.modalidad_interes ?? 'por_periodo',
         fecha_inicio: datos.fecha_inicio,
       },
     });

@@ -4,7 +4,10 @@ import {
   calcularPrestamo,
   calcularSaldoFactura,
   calcularTotalesDocumento,
+  frecuenciaSegura,
   generarCalendarioCuotas,
+  modalidadSegura,
+  tasaAnualEquivalente,
 } from './calculos';
 
 describe('calcularImporteLinea', () => {
@@ -66,34 +69,107 @@ describe('calcularTotalesDocumento', () => {
   });
 });
 
-describe('calcularPrestamo', () => {
+describe('calcularPrestamo · interés fijo total', () => {
   it('calcula interés fijo sobre el capital', () => {
-    const r = calcularPrestamo(10000, 10, 4);
+    const r = calcularPrestamo(10000, 10, 4, 'fijo_total');
     expect(r.interesTotal).toBe(1000);
     expect(r.totalAPagar).toBe(11000);
     expect(r.cuotaBase).toBe(2750);
   });
 
   it('el interés no depende del número de cuotas', () => {
-    expect(calcularPrestamo(10000, 10, 4).interesTotal).toBe(
-      calcularPrestamo(10000, 10, 60).interesTotal
+    expect(calcularPrestamo(10000, 10, 4, 'fijo_total').interesTotal).toBe(
+      calcularPrestamo(10000, 10, 60, 'fijo_total').interesTotal
     );
   });
 
+  it('es la modalidad por defecto, para no alterar préstamos antiguos', () => {
+    expect(calcularPrestamo(10000, 10, 4).interesTotal).toBe(1000);
+  });
+
   it('admite tasa cero', () => {
-    const r = calcularPrestamo(5000, 0, 5);
+    const r = calcularPrestamo(5000, 0, 5, 'fijo_total');
     expect(r.interesTotal).toBe(0);
     expect(r.totalAPagar).toBe(5000);
     expect(r.cuotaBase).toBe(1000);
   });
 
   it('fuerza al menos una cuota', () => {
-    expect(calcularPrestamo(1000, 10, 0).numCuotas).toBe(1);
+    expect(calcularPrestamo(1000, 10, 0, 'fijo_total').numCuotas).toBe(1);
   });
 
   it('ignora valores negativos', () => {
-    const r = calcularPrestamo(-500, -10, 3);
+    const r = calcularPrestamo(-500, -10, 3, 'fijo_total');
     expect(r.totalAPagar).toBe(0);
+  });
+});
+
+describe('calcularPrestamo · interés por periodo', () => {
+  it('cobra la tasa una vez por cuota', () => {
+    // 10% quincenal sobre RD$10,000, 4 cuotas quincenales
+    const r = calcularPrestamo(10000, 10, 4, 'por_periodo');
+    expect(r.interesPorCuota).toBe(1000);
+    expect(r.interesTotal).toBe(4000);
+    expect(r.totalAPagar).toBe(14000);
+    expect(r.cuotaBase).toBe(3500);
+  });
+
+  it('el interés crece con el plazo', () => {
+    expect(calcularPrestamo(10000, 5, 12, 'por_periodo').interesTotal).toBe(6000);
+    expect(calcularPrestamo(10000, 5, 6, 'por_periodo').interesTotal).toBe(3000);
+  });
+
+  it('una sola cuota equivale al interés fijo', () => {
+    expect(calcularPrestamo(10000, 10, 1, 'por_periodo').interesTotal).toBe(
+      calcularPrestamo(10000, 10, 1, 'fijo_total').interesTotal
+    );
+  });
+
+  it('admite tasa cero', () => {
+    const r = calcularPrestamo(5000, 0, 5, 'por_periodo');
+    expect(r.interesTotal).toBe(0);
+    expect(r.totalAPagar).toBe(5000);
+  });
+
+  it('mantiene la precisión con tasas decimales', () => {
+    const r = calcularPrestamo(7500, 2.5, 6, 'por_periodo');
+    expect(r.interesPorCuota).toBe(187.5);
+    expect(r.interesTotal).toBe(1125);
+    expect(r.totalAPagar).toBe(8625);
+    expect(r.cuotaBase).toBe(1437.5);
+  });
+
+  it('no deja interés por cuota en la modalidad fija', () => {
+    expect(calcularPrestamo(10000, 10, 4, 'fijo_total').interesPorCuota).toBe(0);
+  });
+});
+
+describe('tasaAnualEquivalente', () => {
+  it.each([
+    ['diario', 1, 365],
+    ['semanal', 2, 104],
+    ['quincenal', 10, 240],
+    ['mensual', 5, 60],
+    ['bimestral', 10, 60],
+    ['trimestral', 12, 48],
+    ['semestral', 20, 40],
+    ['anual', 30, 30],
+  ] as const)('convierte una tasa %s a su equivalente anual', (frecuencia, tasa, esperada) => {
+    expect(tasaAnualEquivalente(tasa, frecuencia)).toBe(esperada);
+  });
+});
+
+describe('frecuenciaSegura y modalidadSegura', () => {
+  it('acepta los valores conocidos', () => {
+    expect(frecuenciaSegura('trimestral')).toBe('trimestral');
+    expect(modalidadSegura('por_periodo')).toBe('por_periodo');
+  });
+
+  it('cae en un valor sensato ante datos corruptos o antiguos', () => {
+    expect(frecuenciaSegura('cada luna llena')).toBe('mensual');
+    expect(frecuenciaSegura(null)).toBe('mensual');
+    // Un préstamo sin modalidad viene de antes del cambio: interés único.
+    expect(modalidadSegura(undefined)).toBe('fijo_total');
   });
 });
 
@@ -119,9 +195,14 @@ describe('generarCalendarioCuotas', () => {
   });
 
   it.each([
+    ['diario', '2026-01-02'],
     ['semanal', '2026-01-08'],
     ['quincenal', '2026-01-16'],
-    ['mensual', '2026-01-31'],
+    ['mensual', '2026-02-01'],
+    ['bimestral', '2026-03-01'],
+    ['trimestral', '2026-04-01'],
+    ['semestral', '2026-07-01'],
+    ['anual', '2027-01-01'],
   ] as const)('espacia las fechas según la frecuencia %s', (frecuencia, esperada) => {
     const cal = generarCalendarioCuotas(1000, 2, frecuencia, '2026-01-01');
     expect(cal[0].fechaVencimiento).toBe(esperada);
@@ -134,10 +215,40 @@ describe('generarCalendarioCuotas', () => {
     }
   });
 
+  it('cobra el mismo día de cada mes, no cada 30 días', () => {
+    const cal = generarCalendarioCuotas(3000, 3, 'mensual', '2026-01-15');
+    expect(cal.map((c) => c.fechaVencimiento)).toEqual([
+      '2026-02-15',
+      '2026-03-15',
+      '2026-04-15',
+    ]);
+  });
+
+  it('ajusta el día que no existe en el mes de destino', () => {
+    // 31 de enero + 1 mes = 28 de febrero, y el 31 se recupera después.
+    const cal = generarCalendarioCuotas(3000, 3, 'mensual', '2026-01-31');
+    expect(cal.map((c) => c.fechaVencimiento)).toEqual([
+      '2026-02-28',
+      '2026-03-31',
+      '2026-04-30',
+    ]);
+  });
+
   it('cruza el cambio de año correctamente', () => {
     const cal = generarCalendarioCuotas(2000, 2, 'mensual', '2026-12-15');
-    expect(cal[0].fechaVencimiento).toBe('2027-01-14');
-    expect(cal[1].fechaVencimiento).toBe('2027-02-13');
+    expect(cal[0].fechaVencimiento).toBe('2027-01-15');
+    expect(cal[1].fechaVencimiento).toBe('2027-02-15');
+  });
+
+  it('cruza el cambio de año también con frecuencia quincenal', () => {
+    const cal = generarCalendarioCuotas(2000, 2, 'quincenal', '2026-12-25');
+    expect(cal[0].fechaVencimiento).toBe('2027-01-09');
+    expect(cal[1].fechaVencimiento).toBe('2027-01-24');
+  });
+
+  it('respeta el año bisiesto', () => {
+    const cal = generarCalendarioCuotas(1000, 1, 'mensual', '2028-01-31');
+    expect(cal[0].fechaVencimiento).toBe('2028-02-29');
   });
 });
 

@@ -15,6 +15,8 @@ import type {
 import { ESTADO_VACIO, guardarCache, leerCache, limpiarCache } from './services/store';
 import { configuracionCompleta, getSupabaseClient } from './services/supabaseClient';
 import { supabaseDataService } from './services/supabaseDataService';
+import { calcularPrestamo, modalidadSegura } from './utils/calculos';
+import { formatCurrency } from './utils/sanitizer';
 import { useFeedback, mensajeDeError } from './components/feedback/contexto';
 import { Header } from './components/Header';
 import { BottomNav } from './components/BottomNav';
@@ -444,6 +446,28 @@ export function App() {
           : [guardado, ...prev.prestamos],
       };
     });
+
+    // Red de seguridad: si la base de datos todavía no tiene la migración
+    // del interés por periodo, guardaría un interés distinto al que se
+    // mostró en pantalla. Mejor decirlo que dejar pasar un préstamo con
+    // números que no cuadran.
+    const esperado = calcularPrestamo(
+      Number(datos.monto_prestado) || 0,
+      Number(datos.tasa_interes) || 0,
+      Number(datos.num_cuotas) || 1,
+      modalidadSegura(datos.modalidad_interes)
+    ).interesTotal;
+
+    if (Math.abs(Number(guardado.interes_total) - esperado) > 0.01) {
+      avisarError(
+        `El préstamo se guardó, pero el servidor calculó ${formatCurrency(
+          guardado.interes_total
+        )} de interés en vez de ${formatCurrency(esperado)}. ` +
+          'Falta aplicar la migración de interés por periodo en la base de datos.'
+      );
+      return;
+    }
+
     exito(datos.id ? 'Préstamo actualizado.' : 'Préstamo creado con su calendario de cuotas.');
   };
 

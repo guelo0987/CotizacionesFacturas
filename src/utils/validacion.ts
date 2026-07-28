@@ -230,6 +230,9 @@ export function validarMonto(
   opciones: { min?: number; max?: number; permitirCero?: boolean } = {}
 ): Resultado {
   const { min = 0, max = 999_999_999, permitirCero = false } = opciones;
+  if (valor === null || valor === undefined || valor === '') {
+    return error(`${etiqueta} es obligatorio.`);
+  }
   const n = aNumero(valor);
   if (n === null) return error(`${etiqueta} debe ser un número.`);
   if (!permitirCero && n <= 0) return error(`${etiqueta} debe ser mayor que cero.`);

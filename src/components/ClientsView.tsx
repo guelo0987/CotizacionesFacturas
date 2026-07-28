@@ -12,6 +12,7 @@ import {
   validarNombre,
   validarTelefono,
 } from '../utils/validacion';
+import { FRECUENCIAS, frecuenciaSegura, modalidadSegura } from '../utils/calculos';
 import { useAccionAsync } from '../hooks/useAccionAsync';
 import {
   AlertCircle,
@@ -600,7 +601,8 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                               {formatCurrency(pres.monto_prestado)}
                             </span>
                             <span className="text-slate-400 text-[11px] block">
-                              {pres.num_cuotas} cuotas ({pres.frecuencia})
+                              {pres.num_cuotas} cuotas{' '}
+                              {FRECUENCIAS[frecuenciaSegura(pres.frecuencia)].plural}
                             </span>
                           </div>
                           <div className="text-right">
@@ -608,7 +610,10 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                               Total: {formatCurrency(pres.total_a_pagar)}
                             </span>
                             <span className="text-[11px] text-slate-500">
-                              Tasa {pres.tasa_interes}%
+                              Tasa {pres.tasa_interes}%{' '}
+                              {modalidadSegura(pres.modalidad_interes) === 'por_periodo'
+                                ? FRECUENCIAS[frecuenciaSegura(pres.frecuencia)].adjetivo
+                                : 'único'}
                             </span>
                           </div>
                         </div>

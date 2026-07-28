@@ -5,7 +5,28 @@ export type EstadoCotizacion = 'borrador' | 'enviada' | 'aceptada' | 'rechazada'
 export type EstadoFactura = 'pendiente' | 'parcial' | 'pagada' | 'anulada';
 export type MetodoPago = 'efectivo' | 'transferencia' | 'tarjeta' | 'otro';
 
-export type FrecuenciaPrestamo = 'semanal' | 'quincenal' | 'mensual';
+export type FrecuenciaPrestamo =
+  | 'diario'
+  | 'semanal'
+  | 'quincenal'
+  | 'mensual'
+  | 'bimestral'
+  | 'trimestral'
+  | 'semestral'
+  | 'anual';
+
+/**
+ * Cómo se interpreta la tasa de interés del préstamo.
+ *
+ * - `por_periodo`: la tasa se cobra en cada cuota. «10% quincenal» a 4
+ *   cuotas quincenales son 40% de interés. Es el modelo habitual del
+ *   prestamista dominicano.
+ * - `fijo_total`: la tasa se cobra una sola vez sobre el capital, sin
+ *   importar el plazo. Es el modelo que usaban los préstamos creados antes
+ *   de julio de 2026 y se conserva para no alterar sus números.
+ */
+export type ModalidadInteres = 'por_periodo' | 'fijo_total';
+
 export type EstadoPrestamo = 'activo' | 'saldado' | 'atrasado';
 export type EstadoCuota = 'pendiente' | 'parcial' | 'pagada' | 'atrasada';
 
@@ -116,7 +137,8 @@ export interface Prestamo {
   id: string;
   cliente_id: string;
   monto_prestado: number;
-  tasa_interes: number; // Porcentaje (%)
+  tasa_interes: number; // Porcentaje (%) por periodo o total, según la modalidad
+  modalidad_interes: ModalidadInteres;
   interes_total: number;
   total_a_pagar: number;
   num_cuotas: number;

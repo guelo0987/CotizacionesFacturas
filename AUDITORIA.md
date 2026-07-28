@@ -332,3 +332,124 @@ M1, M2, M3, M7, M8, M9. Aquí es donde el producto empieza a parecer un producto
 
 **Fase 5 — Diferenciación comercial**
 M10, M11, M12, B5. Reportes y control fiscal son lo que justifica el precio frente a una hoja de cálculo.
+
+---
+
+# Segunda ronda — 28 de julio de 2026 (previa a la entrega)
+
+**Alcance:** los fallos reportados por el cliente sobre el PDF, el envío por
+WhatsApp, los campos de dinero y el cálculo del interés de los préstamos,
+más una revisión de lo que quedaba pendiente para entregar.
+
+**Estado del build:** `tsc -b` sin errores · `oxlint` sin avisos en `src/` ·
+167 pruebas en verde · `vite build` correcto.
+
+## Corregido en esta ronda
+
+### R1. La descarga del PDF fallaba siempre — «unsupported color function "oklch"»
+
+*Crítico. Ninguna cotización ni factura se podía exportar.*
+
+Tailwind 4 genera toda su paleta en `oklch()`. `html2canvas` (el motor que
+usa `html2pdf.js`) es de 2022 y sólo entiende `#rrggbb`, `rgb()` y `hsl()`:
+al encontrar el primer `oklch()` aborta. Medido en la vista previa real: **45
+de los 49 elementos** del documento tenían al menos un color en `oklch`.
+
+Arreglo: `src/utils/colores.ts` traduce a sRGB todos los colores del
+documento justo antes de rasterizar y los restaura al terminar. La traducción
+no puede hacerse leyendo `canvas.fillStyle` —los navegadores actuales
+conservan el espacio de origen y devuelven el mismo `oklch(...)`—, así que se
+pinta un píxel y se leen sus bytes.
+
+Verificado en navegador: PDF de 216 KB generado desde la vista previa real,
+con los colores intactos y sin residuos en el DOM después.
+
+### R2. Lo impreso no se parecía a la vista previa
+
+La hoja `@media print` forzaba el encabezado de la tabla a gris claro y
+dependía de un `:has()` frágil para atravesar el modal. Ahora se marca toda
+la cadena de ancestros (`.ruta-impresion`) y se activa `print-color-adjust:
+exact`, así que el papel reproduce la vista previa: mismo logo, mismo
+encabezado oscuro, mismos acentos verdes.
+
+### R3. El PDF cambiaba de forma según el dispositivo
+
+El documento usaba puntos de corte `sm:`, de modo que la misma factura salía
+a dos columnas desde un ordenador y apilada desde un móvil. Ahora
+`.printable-pdf` tiene un ancho fijo de 720 px y ninguna clase responsiva: el
+PDF y la impresión son idénticos desde cualquier equipo. En pantallas
+estrechas la vista previa se desplaza en horizontal.
+
+### R4. «Compartir por WhatsApp» enviaba texto, no el documento
+
+Se abría `wa.me` con un resumen escrito. Ahora se genera el PDF y se entrega
+a la hoja de compartir del sistema (Web Share API con archivos): es WhatsApp
+quien muestra la lista de contactos, como esperaba el cliente. En navegadores
+de escritorio, que no admiten compartir archivos, se descarga el PDF y se
+abre WhatsApp Web con el resumen, avisando al usuario de que lo adjunte.
+
+Los botones de WhatsApp del listado de documentos ahora abren la vista previa
+en vez de mandar sólo texto: hay un único camino para compartir, y siempre
+lleva el PDF.
+
+### R5. Los campos de dinero no se podían vaciar
+
+`<input type="number">` controlado por un número: al borrar el contenido,
+`sanearNumero('')` devolvía el valor por defecto `0` y el campo volvía a
+mostrar «0» delante de lo que se tecleara.
+
+Nuevo componente `CampoMoneda` (`src/components/campos/`): prefijo «RD$»,
+separador de miles según se escribe, dos decimales al salir del campo,
+`inputMode="decimal"` para el teclado numérico del móvil y conservación de la
+posición del cursor al insertar las comas. Admite quedarse vacío y emite
+`null`, que el formulario distingue de un cero.
+
+Aplicado en: precio base del catálogo, precio unitario de cada línea, monto
+prestado, abono a una cuota y abono a una factura. La casilla de cantidad, que
+no es dinero, vuelve a 1 al vaciarse en lugar de quedarse en 0.
+
+### R6. El interés no tenía nada que ver con la frecuencia
+
+Decir «interés quincenal» no significaba nada: la tasa se cobraba una sola vez
+sobre el capital y la frecuencia sólo movía las fechas de vencimiento. Un 10%
+era 10% con 4 cuotas quincenales y con 24 mensuales.
+
+Cada préstamo declara ahora **cómo** se cobra su interés:
+
+| Modalidad | Interés total | Uso |
+|---|---|---|
+| `por_periodo` | tasa × nº de cuotas × capital | Modelo del prestamista dominicano. Por defecto en los préstamos nuevos |
+| `fijo_total` | tasa × capital | Comportamiento anterior. Queda marcado en los préstamos ya existentes, cuyos números no cambian |
+
+Frecuencias admitidas: diaria, semanal, quincenal, mensual, bimestral,
+trimestral, semestral y anual. Los periodos de un mes o más avanzan **por
+calendario**, no en bloques de 30 días: quien cobra «el 15 de cada mes»
+seguía viendo el vencimiento correrse un día cada mes. El 31 de enero vence
+el 28 de febrero (o el 29 en bisiesto) y el 31 se recupera en marzo.
+
+La interfaz rotula la tasa con su periodo («Tasa de interés quincenal (%)») y
+muestra la tasa simple anual equivalente, para que nadie confunda un 10%
+quincenal con un 10% anual.
+
+> **Requiere migración.** `supabase/migrations/20260728000500_interes_por_periodo.sql`
+> debe aplicarse **antes** de publicar esta versión. Si no, la pantalla
+> mostraría el interés por periodo y el servidor guardaría el fijo. Como red
+> de seguridad, la aplicación compara el interés devuelto por el servidor con
+> el que mostró y avisa si no coinciden.
+
+### R7. Informes ambiguos
+
+El CSV de préstamos y la ficha del cliente mostraban «Tasa 10%» sin decir si
+era por cuota o único. Ambos indican ahora la modalidad y la frecuencia.
+
+## Pendiente / conocido
+
+- **`npm audit` reporta 8 vulnerabilidades altas**, todas en la cadena
+  `vite-plugin-pwa → workbox-build → ejs`. Son dependencias de *build*: no
+  viajan en el paquete que recibe el navegador. Resolverlas exige bajar
+  `vite-plugin-pwa` a la 1.2.0. No bloquea la entrega.
+- **`PdfModal` pesa 948 KB** (269 KB comprimido) porque arrastra
+  `html2pdf.js` con jsPDF y html2canvas dentro. Ya se carga de forma
+  diferida, así que sólo se descarga al abrir la primera vista previa.
+- La aplicación necesita `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` en el
+  entorno de despliegue: no hay valores por defecto (ver `DESPLIEGUE.md`).

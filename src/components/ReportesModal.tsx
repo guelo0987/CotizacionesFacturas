@@ -3,6 +3,7 @@ import type { AppState } from '../types';
 import { formatCurrency, formatDate } from '../utils/sanitizer';
 import { formatearDocumento, formatearTelefono, redondearDinero } from '../utils/validacion';
 import { descargarCSV, generarCSV, nombreConFecha } from '../utils/exportar';
+import { FRECUENCIAS, frecuenciaSegura, modalidadSegura } from '../utils/calculos';
 import { useFeedback } from './feedback/contexto';
 import { Download, FileSpreadsheet, X } from 'lucide-react';
 
@@ -127,8 +128,9 @@ export const ReportesModal: React.FC<ReportesModalProps> = ({ state, onClose }) 
         nombre = 'prestamos';
         csv = generarCSV(
           [
-            'Cliente', 'Fecha inicio', 'Prestado', 'Tasa %', 'Interés', 'Total a pagar',
-            'Cuotas', 'Frecuencia', 'Estado', 'Cobrado', 'Pendiente', 'Cuotas atrasadas',
+            'Cliente', 'Fecha inicio', 'Prestado', 'Tasa %', 'Cobro del interés',
+            'Interés', 'Total a pagar', 'Cuotas', 'Frecuencia', 'Estado', 'Cobrado',
+            'Pendiente', 'Cuotas atrasadas',
           ],
           state.prestamos.map((p) => {
             const cobrado = redondearDinero(
@@ -139,6 +141,11 @@ export const ReportesModal: React.FC<ReportesModalProps> = ({ state, onClose }) 
               formatDate(p.fecha_inicio),
               p.monto_prestado,
               p.tasa_interes,
+              // Sin esta columna un «10%» en el reporte sería ambiguo: puede
+              // ser 10% por cuota o 10% una sola vez sobre el capital.
+              modalidadSegura(p.modalidad_interes) === 'por_periodo'
+                ? `Por cuota (${FRECUENCIAS[frecuenciaSegura(p.frecuencia)].adjetivo})`
+                : 'Único sobre el capital',
               p.interes_total,
               p.total_a_pagar,
               p.num_cuotas,

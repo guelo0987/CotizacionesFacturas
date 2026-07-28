@@ -9,6 +9,7 @@ import {
   validarMonto,
   validarNombre,
 } from '../utils/validacion';
+import { CampoMoneda } from './campos/CampoMoneda';
 import { useAccionAsync } from '../hooks/useAccionAsync';
 import { AlertCircle, CheckCircle, Edit2, Plus, Trash2, Wrench, X, XCircle } from 'lucide-react';
 
@@ -23,7 +24,9 @@ const FORM_VACIO = {
   nombre: '',
   categoria: 'plomería' as CategoriaServicio,
   descripcion: '',
-  precio_base: 0,
+  // `null` y no `0`: el campo nace vacío, sin un cero pegado delante de lo
+  // que se teclee después.
+  precio_base: null as number | null,
   unidad: 'servicio' as UnidadServicio,
   activo: true,
 };
@@ -90,7 +93,9 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
     const nombre = limpiarTexto(formData.nombre, 160);
     const fallo = primerError(
       validarNombre(nombre, 'El nombre del servicio'),
-      validarMonto(formData.precio_base, 'El precio base', { permitirCero: true })
+      // Dejar el campo vacío equivale a un precio de cero: hay servicios que
+      // se cotizan a convenir y no deben bloquear el guardado.
+      validarMonto(formData.precio_base ?? 0, 'El precio base', { permitirCero: true })
     );
     if (fallo) {
       setErrorForm(fallo);
@@ -109,7 +114,11 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
       nombre,
       categoria: formData.categoria,
       descripcion: limpiarTextoMultilinea(formData.descripcion, 500),
-      precio_base: sanearNumero(formData.precio_base, { min: 0, max: 99999999, decimales: 2 }),
+      precio_base: sanearNumero(formData.precio_base ?? 0, {
+        min: 0,
+        max: 99999999,
+        decimales: 2,
+      }),
       unidad: formData.unidad,
       activo: formData.activo,
     };
@@ -340,23 +349,10 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
                 <label htmlFor="serv-precio" className="block text-xs font-semibold text-slate-700 mb-1">
                   Precio base *
                 </label>
-                <input
+                <CampoMoneda
                   id="serv-precio"
-                  type="number"
-                  min={0}
-                  step="any"
                   value={formData.precio_base}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      precio_base: sanearNumero(e.target.value, {
-                        min: 0,
-                        max: 99999999,
-                        decimales: 2,
-                      }),
-                    })
-                  }
-                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold text-emerald-700 focus:outline-none focus:border-emerald-500"
+                  onChange={(precio_base) => setFormData({ ...formData, precio_base })}
                 />
               </div>
 

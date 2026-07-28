@@ -2,13 +2,20 @@ import type { Cotizacion, Factura, Prestamo, Cuota, Cliente, BusinessSettings } 
 import { formatCurrency, formatDate } from './sanitizer';
 import { telefonoParaWhatsapp } from './validacion';
 
-function construirUrl(mensaje: string, telefono?: string | null): string {
+export function construirUrl(mensaje: string, telefono?: string | null): string {
   const encoded = encodeURIComponent(mensaje);
   const numero = telefono ? telefonoParaWhatsapp(telefono) : '';
   return numero ? `https://wa.me/${numero}?text=${encoded}` : `https://wa.me/?text=${encoded}`;
 }
 
-export function generateWhatsappQuoteUrl(
+/**
+ * Resumen del documento para acompañar al PDF.
+ *
+ * Se separa del enlace porque compartir el archivo con la hoja nativa del
+ * sistema —donde el usuario elige el contacto dentro de WhatsApp— necesita
+ * el texto suelto, no una URL de `wa.me`.
+ */
+export function mensajeCotizacion(
   cotizacion: Cotizacion,
   cliente?: Cliente,
   settings?: BusinessSettings
@@ -35,10 +42,10 @@ export function generateWhatsappQuoteUrl(
 
   msg += `Quedamos a su disposición para cualquier duda o confirmación.\n¡Gracias por preferirnos!`;
 
-  return construirUrl(msg, cliente?.telefono);
+  return msg;
 }
 
-export function generateWhatsappInvoiceUrl(
+export function mensajeFactura(
   factura: Factura,
   cliente?: Cliente,
   settings?: BusinessSettings
@@ -62,7 +69,19 @@ export function generateWhatsappInvoiceUrl(
 
   msg += `¡Gracias por su confianza y puntualidad!`;
 
-  return construirUrl(msg, cliente?.telefono);
+  return msg;
+}
+
+/** Mensaje que acompaña al PDF de una cotización o factura. */
+export function mensajeDocumento(
+  tipo: 'cotizacion' | 'factura',
+  doc: Cotizacion | Factura,
+  cliente?: Cliente,
+  settings?: BusinessSettings
+): string {
+  return tipo === 'factura'
+    ? mensajeFactura(doc as Factura, cliente, settings)
+    : mensajeCotizacion(doc as Cotizacion, cliente, settings);
 }
 
 export function generateWhatsappLoanCuotaUrl(

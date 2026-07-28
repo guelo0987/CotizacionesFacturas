@@ -758,3 +758,7 @@ begin
     execute format('grant execute on function %s to authenticated', f);
   end loop;
 end $$;
+
+-- Función auxiliar interna: no debe quedar expuesta como endpoint.
+revoke all on function public.calcular_totales(jsonb, boolean, numeric)
+  from public, anon, authenticated;

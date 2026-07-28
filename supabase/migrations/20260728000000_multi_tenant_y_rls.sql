@@ -409,20 +409,17 @@ alter table public.prestamos             enable row level security;
 alter table public.cuotas                enable row level security;
 alter table public.pagos                 enable row level security;
 
--- Nadie puede saltarse el RLS desde la API, ni siquiera el dueño de la tabla
-alter table public.organizaciones        force row level security;
-alter table public.perfiles              force row level security;
-alter table public.configuracion_negocio force row level security;
-alter table public.secuencias_documento  force row level security;
-alter table public.clientes              force row level security;
-alter table public.servicios             force row level security;
-alter table public.cotizaciones          force row level security;
-alter table public.cotizacion_items      force row level security;
-alter table public.facturas              force row level security;
-alter table public.factura_items         force row level security;
-alter table public.prestamos             force row level security;
-alter table public.cuotas                force row level security;
-alter table public.pagos                 force row level security;
+-- Deliberadamente NO se usa `force row level security`.
+--
+-- `force` somete también al dueño de la tabla (postgres) a las políticas.
+-- Las funciones `security definer` de la siguiente migración se apoyan en
+-- que el dueño sí las salta: `crear_organizacion` inserta en
+-- `organizaciones` y en `perfiles`, tablas que a propósito no tienen
+-- política de INSERT. Con `force` activo, el registro de cuentas nuevas
+-- fallaría por completo.
+--
+-- No debilita el aislamiento: ni `anon` ni `authenticated` son dueños de
+-- estas tablas, así que siguen sujetos al RLS en todo momento.
 
 -- Organización: sólo la propia, y sólo lectura/actualización (nunca insert
 -- directo — se crea a través de la función de alta)
@@ -510,6 +507,11 @@ create trigger trg_org_padre before insert or update on public.cuotas
 drop trigger if exists trg_org_padre on public.pagos;
 create trigger trg_org_padre before insert or update on public.pagos
   for each row execute function public.validar_org_padre();
+
+-- Postgres concede EXECUTE a PUBLIC en toda función nueva, así que una
+-- función `security definer` en el esquema `public` queda expuesta como
+-- endpoint de la API. Ésta sólo debe ejecutarse desde el disparador.
+revoke all on function public.validar_org_padre() from public, anon, authenticated;
 
 -- ---------------------------------------------------------------------
 -- 11. Permisos

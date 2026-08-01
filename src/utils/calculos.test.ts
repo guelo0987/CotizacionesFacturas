@@ -9,6 +9,7 @@ import {
   modalidadSegura,
   tasaAnualEquivalente,
 } from './calculos';
+import { redondearDinero } from './validacion';
 
 describe('calcularImporteLinea', () => {
   it('multiplica cantidad por precio', () => {
@@ -139,9 +140,90 @@ describe('calcularPrestamo · interés por periodo', () => {
     expect(r.cuotaBase).toBe(1437.5);
   });
 
-  it('no deja interés por cuota en la modalidad fija', () => {
-    expect(calcularPrestamo(10000, 10, 4, 'fijo_total').interesPorCuota).toBe(0);
+  it('reparte el interés único en partes iguales entre las cuotas', () => {
+    // 10% de 10,000 = 1,000 repartido entre 4 cuotas
+    expect(calcularPrestamo(10000, 10, 4, 'fijo_total').interesPorCuota).toBe(250);
   });
+});
+
+describe('calcularPrestamo · cuota fija amortizada', () => {
+  // Caso de referencia: reproduce exactamente el sistema con el que el
+  // cliente compara (RD$10,000 al 12% quincenal a 4 cuotas).
+  const referencia = () => calcularPrestamo(10000, 12, 4, 'amortizado');
+
+  it('calcula la cuota del sistema francés', () => {
+    // cuota = 10000 × 0.12 / (1 − 1.12^−4) = 3,292.34
+    expect(referencia().cuotaBase).toBe(3292.34);
+  });
+
+  it('cobra menos interés que el modelo por periodo', () => {
+    expect(referencia().interesTotal).toBe(3169.38);
+    expect(calcularPrestamo(10000, 12, 4, 'por_periodo').interesTotal).toBe(4800);
+  });
+
+  it('reproduce la tabla de amortización al centavo', () => {
+    const cuotas = referencia().cuotas;
+    expect(cuotas.map((c) => c.interes)).toEqual([1200, 948.92, 667.71, 352.75]);
+    expect(cuotas.map((c) => c.capital)).toEqual([2092.34, 2343.42, 2624.63, 2939.61]);
+    expect(cuotas.map((c) => c.saldo)).toEqual([7907.66, 5564.24, 2939.61, 0]);
+  });
+
+  it('el interés baja cuota a cuota', () => {
+    const interes = referencia().cuotas.map((c) => c.interes);
+    for (let i = 1; i < interes.length; i++) {
+      expect(interes[i]).toBeLessThan(interes[i - 1]);
+    }
+  });
+
+  it('liquida el capital exactamente, sin céntimos colgando', () => {
+    const cuotas = referencia().cuotas;
+    expect(cuotas[cuotas.length - 1].saldo).toBe(0);
+    expect(redondearDinero(cuotas.reduce((a, c) => a + c.capital, 0))).toBe(10000);
+  });
+
+  it('la primera cuota carga el mismo interés que el modelo por periodo', () => {
+    expect(referencia().cuotas[0].interes).toBe(
+      calcularPrestamo(10000, 12, 4, 'por_periodo').cuotas[0].interes
+    );
+  });
+
+  it('sin interés reparte el capital en partes iguales', () => {
+    const r = calcularPrestamo(12000, 0, 4, 'amortizado');
+    expect(r.interesTotal).toBe(0);
+    expect(r.totalAPagar).toBe(12000);
+    expect(r.cuotas.map((c) => c.monto)).toEqual([3000, 3000, 3000, 3000]);
+  });
+
+  it('con una sola cuota cobra capital más un periodo de interés', () => {
+    const r = calcularPrestamo(10000, 12, 1, 'amortizado');
+    expect(r.interesTotal).toBe(1200);
+    expect(r.totalAPagar).toBe(11200);
+  });
+
+  it('aguanta un plazo largo sin dejar que el capital crezca', () => {
+    const r = calcularPrestamo(10000, 12, 120, 'amortizado');
+    expect(r.cuotas.every((c) => c.capital >= 0)).toBe(true);
+    expect(r.cuotas[r.cuotas.length - 1].saldo).toBe(0);
+  });
+});
+
+describe('desglose de cuotas · las tres modalidades', () => {
+  it.each(['por_periodo', 'amortizado', 'fijo_total'] as const)(
+    'en %s la suma de capital devuelve el préstamo y los montos cuadran',
+    (modalidad) => {
+      const r = calcularPrestamo(7350.55, 8.25, 7, modalidad);
+      const capital = redondearDinero(r.cuotas.reduce((a, c) => a + c.capital, 0));
+      const montos = redondearDinero(r.cuotas.reduce((a, c) => a + c.monto, 0));
+
+      expect(capital).toBe(7350.55);
+      expect(montos).toBe(r.totalAPagar);
+      expect(r.cuotas[r.cuotas.length - 1].saldo).toBe(0);
+      // Cada cuota es exactamente interés + capital
+      for (const c of r.cuotas) {
+        expect(redondearDinero(c.interes + c.capital)).toBe(c.monto);
+      }
+    }
+  );
 });
 
 describe('tasaAnualEquivalente', () => {

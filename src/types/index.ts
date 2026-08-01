@@ -18,14 +18,18 @@ export type FrecuenciaPrestamo =
 /**
  * Cómo se interpreta la tasa de interés del préstamo.
  *
- * - `por_periodo`: la tasa se cobra en cada cuota. «10% quincenal» a 4
- *   cuotas quincenales son 40% de interés. Es el modelo habitual del
- *   prestamista dominicano.
+ * - `por_periodo`: la tasa se cobra en cada cuota sobre el capital
+ *   completo. «10% quincenal» a 4 cuotas quincenales son 40% de interés.
+ *   El capital no baja hasta la última cuota. Modelo del prestamista
+ *   dominicano.
+ * - `amortizado`: cuota fija del sistema francés. La tasa se cobra sobre el
+ *   saldo que queda, así que el interés baja cuota a cuota y el capital se
+ *   va liquidando. Es el modelo de los bancos.
  * - `fijo_total`: la tasa se cobra una sola vez sobre el capital, sin
  *   importar el plazo. Es el modelo que usaban los préstamos creados antes
  *   de julio de 2026 y se conserva para no alterar sus números.
  */
-export type ModalidadInteres = 'por_periodo' | 'fijo_total';
+export type ModalidadInteres = 'por_periodo' | 'amortizado' | 'fijo_total';
 
 export type EstadoPrestamo = 'activo' | 'saldado' | 'atrasado';
 export type EstadoCuota = 'pendiente' | 'parcial' | 'pagada' | 'atrasada';
@@ -129,6 +133,12 @@ export interface Cuota {
   numero: number;
   fecha_vencimiento: string;
   monto: number;
+  /** Parte de la cuota que es interés. */
+  interes: number;
+  /** Parte de la cuota que abona al capital. */
+  capital: number;
+  /** Capital que sigue debiéndose tras pagar esta cuota. */
+  saldo_capital: number;
   monto_pagado: number;
   estado: EstadoCuota;
 }

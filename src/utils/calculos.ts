@@ -106,8 +106,46 @@ export function frecuenciaSegura(valor: string | null | undefined): FrecuenciaPr
   return valor && valor in FRECUENCIAS ? (valor as FrecuenciaPrestamo) : 'mensual';
 }
 
+export interface DefinicionModalidad {
+  etiqueta: string;
+  /** Frase corta para el desplegable, ya con la frecuencia dentro. */
+  descripcion: (adjetivo: string) => string;
+  /** ¿El capital baja con cada cuota? */
+  amortiza: boolean;
+}
+
+export const MODALIDADES: Record<ModalidadInteres, DefinicionModalidad> = {
+  por_periodo: {
+    etiqueta: 'Interés simple por periodo',
+    descripcion: (adj) => `Interés ${adj} — se cobra en cada cuota, sobre el capital completo`,
+    amortiza: false,
+  },
+  amortizado: {
+    etiqueta: 'Cuota fija amortizada',
+    descripcion: (adj) => `Cuota fija amortizada — interés ${adj} sobre el saldo que queda`,
+    amortiza: true,
+  },
+  fijo_total: {
+    etiqueta: 'Interés único',
+    descripcion: () => 'Interés único sobre el capital — se cobra una sola vez',
+    amortiza: false,
+  },
+};
+
+export const MODALIDADES_VALIDAS = Object.keys(MODALIDADES) as ModalidadInteres[];
+
 export function modalidadSegura(valor: string | null | undefined): ModalidadInteres {
-  return valor === 'por_periodo' || valor === 'fijo_total' ? valor : 'fijo_total';
+  return valor && valor in MODALIDADES ? (valor as ModalidadInteres) : 'fijo_total';
+}
+
+/** Reparto de una cuota entre lo que paga de interés y lo que abona al capital. */
+export interface DesgloseCuota {
+  numero: number;
+  monto: number;
+  interes: number;
+  capital: number;
+  /** Capital que sigue debiéndose después de pagar esta cuota. */
+  saldo: number;
 }
 
 export interface ResumenPrestamo {
@@ -115,18 +153,105 @@ export interface ResumenPrestamo {
   totalAPagar: number;
   cuotaBase: number;
   numCuotas: number;
-  /** Interés que carga cada cuota (0 en la modalidad de interés fijo). */
+  /** Interés de la primera cuota. En `amortizado` las siguientes bajan. */
   interesPorCuota: number;
+  cuotas: DesgloseCuota[];
 }
 
 /**
- * Interés simple sobre el capital: nunca se amortiza, el capital no baja
- * al abonar. Es el modelo de cobro del préstamo informal dominicano.
+ * Cuota fija del sistema francés: el pago constante que liquida el capital
+ * y sus intereses en `n` periodos, cobrando la tasa sobre el saldo vivo.
  *
- * - `por_periodo`: la tasa se cobra en cada cuota. 10% quincenal a 4 cuotas
- *   quincenales son 40% de interés sobre el capital.
- * - `fijo_total`: la tasa se cobra una sola vez, sin importar el plazo ni
- *   la frecuencia.
+ *     cuota = capital × i / (1 − (1 + i)^−n)
+ */
+function cuotaAmortizada(capital: number, tasaPeriodo: number, cuotas: number): number {
+  if (tasaPeriodo <= 0) return redondearDinero(capital / cuotas);
+  const descuento = Math.pow(1 + tasaPeriodo, -cuotas);
+  return redondearDinero((capital * tasaPeriodo) / (1 - descuento));
+}
+
+/**
+ * Desglose cuota por cuota. Es la única fuente de verdad de los números del
+ * préstamo: el resumen se deriva de aquí, no al revés.
+ *
+ * En las tres modalidades la última cuota absorbe el redondeo, de modo que
+ * el saldo cierra exactamente en cero y no queda ningún céntimo colgando.
+ */
+export function calcularDesgloseCuotas(
+  montoPrestado: number,
+  tasaInteres: number,
+  numCuotas: number,
+  modalidad: ModalidadInteres = 'fijo_total'
+): DesgloseCuota[] {
+  const capital = Math.max(0, montoPrestado || 0);
+  const tasa = Math.max(0, tasaInteres || 0) / 100;
+  const n = Math.max(1, Math.floor(numCuotas || 1));
+
+  // Interés que carga cada cuota cuando el capital no se amortiza.
+  const interesFijoPorCuota =
+    modalidad === 'por_periodo'
+      ? redondearDinero(capital * tasa)
+      : modalidad === 'fijo_total'
+      ? redondearDinero((capital * tasa) / n)
+      : 0;
+
+  const cuotaFija = modalidad === 'amortizado' ? cuotaAmortizada(capital, tasa, n) : 0;
+  const capitalPorCuota = redondearDinero(capital / n);
+
+  const desglose: DesgloseCuota[] = [];
+  let saldo = capital;
+  let interesAcumulado = 0;
+
+  for (let numero = 1; numero <= n; numero++) {
+    const ultima = numero === n;
+
+    // Sobre el saldo vivo en la cuota fija amortizada; sobre el capital
+    // completo cuando el préstamo no amortiza.
+    let interes = modalidad === 'amortizado'
+      ? redondearDinero(saldo * tasa)
+      : interesFijoPorCuota;
+
+    let abonoCapital = ultima
+      ? saldo
+      : modalidad === 'amortizado'
+      ? redondearDinero(cuotaFija - interes)
+      : capitalPorCuota;
+
+    if (ultima && modalidad === 'fijo_total') {
+      // El interés único no se reparte en partes exactas: el resto cae aquí.
+      interes = redondearDinero(capital * tasa - interesAcumulado);
+    }
+
+    // Con tasas muy altas y plazos largos la cuota apenas cubre el interés;
+    // nunca se deja que el capital crezca.
+    if (abonoCapital < 0) abonoCapital = 0;
+
+    interesAcumulado = redondearDinero(interesAcumulado + interes);
+    saldo = redondearDinero(saldo - abonoCapital);
+
+    desglose.push({
+      numero,
+      monto: redondearDinero(abonoCapital + interes),
+      interes,
+      capital: abonoCapital,
+      saldo,
+    });
+  }
+
+  return desglose;
+}
+
+/**
+ * Resumen del préstamo. Tres formas de cobrar, todas con interés simple
+ * (nunca se capitaliza el interés impagado):
+ *
+ * - `por_periodo`: la tasa se cobra en cada cuota sobre el capital completo.
+ *   10% quincenal a 4 cuotas quincenales son 40% de interés. Es el modelo
+ *   del prestamista dominicano y el capital no baja hasta la última cuota.
+ * - `amortizado`: cuota fija del sistema francés. La tasa se cobra sobre el
+ *   saldo que queda, así que el interés baja cuota a cuota. Es lo que usan
+ *   los bancos.
+ * - `fijo_total`: la tasa se cobra una sola vez, sin importar el plazo.
  */
 export function calcularPrestamo(
   montoPrestado: number,
@@ -134,23 +259,18 @@ export function calcularPrestamo(
   numCuotas: number,
   modalidad: ModalidadInteres = 'fijo_total'
 ): ResumenPrestamo {
-  const monto = Math.max(0, montoPrestado || 0);
-  const tasa = Math.max(0, tasaInteres || 0);
-  const cuotas = Math.max(1, Math.floor(numCuotas || 1));
+  const cuotas = calcularDesgloseCuotas(montoPrestado, tasaInteres, numCuotas, modalidad);
 
-  const interesPorCuota = modalidad === 'por_periodo' ? redondearDinero(monto * (tasa / 100)) : 0;
-  const interesTotal =
-    modalidad === 'por_periodo'
-      ? redondearDinero(monto * (tasa / 100) * cuotas)
-      : redondearDinero(monto * (tasa / 100));
-  const totalAPagar = redondearDinero(monto + interesTotal);
+  const interesTotal = redondearDinero(cuotas.reduce((suma, c) => suma + c.interes, 0));
+  const totalAPagar = redondearDinero(cuotas.reduce((suma, c) => suma + c.monto, 0));
 
   return {
     interesTotal,
     totalAPagar,
-    cuotaBase: redondearDinero(totalAPagar / cuotas),
-    numCuotas: cuotas,
-    interesPorCuota,
+    cuotaBase: cuotas[0].monto,
+    numCuotas: cuotas.length,
+    interesPorCuota: cuotas[0].interes,
+    cuotas,
   };
 }
 

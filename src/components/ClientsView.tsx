@@ -611,9 +611,9 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                             </span>
                             <span className="text-[11px] text-slate-500">
                               Tasa {pres.tasa_interes}%{' '}
-                              {modalidadSegura(pres.modalidad_interes) === 'por_periodo'
-                                ? FRECUENCIAS[frecuenciaSegura(pres.frecuencia)].adjetivo
-                                : 'único'}
+                              {modalidadSegura(pres.modalidad_interes) === 'fijo_total'
+                                ? 'único'
+                                : FRECUENCIAS[frecuenciaSegura(pres.frecuencia)].adjetivo}
                             </span>
                           </div>
                         </div>

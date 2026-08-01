@@ -12,6 +12,8 @@ import { formatCurrency, formatDate } from '../utils/sanitizer';
 import {
   FRECUENCIAS,
   FRECUENCIAS_VALIDAS,
+  MODALIDADES,
+  MODALIDADES_VALIDAS,
   calcularPrestamo,
   frecuenciaSegura,
   modalidadSegura,
@@ -380,9 +382,12 @@ export const LoansView: React.FC<LoansViewProps> = ({
                   <div>
                     <span className="text-[11px] text-slate-500 block">
                       Interés ({prestamo.tasa_interes}%
-                      {modalidadSegura(prestamo.modalidad_interes) === 'por_periodo'
-                        ? ` ${FRECUENCIAS[frecuenciaSegura(prestamo.frecuencia)].adjetivo}`
-                        : ' único'}
+                      {modalidadSegura(prestamo.modalidad_interes) === 'fijo_total'
+                        ? ' único'
+                        : ` ${FRECUENCIAS[frecuenciaSegura(prestamo.frecuencia)].adjetivo}`}
+                      {modalidadSegura(prestamo.modalidad_interes) === 'amortizado'
+                        ? ' amort.'
+                        : ''}
                       )
                     </span>
                     <span className="font-bold text-slate-700">
@@ -579,18 +584,19 @@ export const LoansView: React.FC<LoansViewProps> = ({
                   }
                   className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-emerald-500"
                 >
-                  <option value="por_periodo">
-                    Interés {frecuenciaActual.adjetivo} — se cobra en cada cuota
-                  </option>
-                  <option value="fijo_total">Interés único sobre el capital — se cobra una vez</option>
+                  {MODALIDADES_VALIDAS.map((id) => (
+                    <option key={id} value={id}>
+                      {MODALIDADES[id].descripcion(frecuenciaActual.adjetivo)}
+                    </option>
+                  ))}
                 </select>
               </div>
 
               <div>
                 <label htmlFor="pres-tasa" className="block text-sm font-semibold text-slate-700 mb-1">
-                  {formData.modalidad_interes === 'por_periodo'
-                    ? `Tasa de interés ${frecuenciaActual.adjetivo} (%) *`
-                    : 'Tasa de interés total (%) *'}
+                  {formData.modalidad_interes === 'fijo_total'
+                    ? 'Tasa de interés total (%) *'
+                    : `Tasa de interés ${frecuenciaActual.adjetivo} (%) *`}
                 </label>
                 <input
                   id="pres-tasa"
@@ -614,7 +620,9 @@ export const LoansView: React.FC<LoansViewProps> = ({
                 />
                 <p id="pres-tasa-ayuda" className="text-xs text-slate-500 mt-1">
                   {formData.modalidad_interes === 'por_periodo'
-                    ? `Se cobra ${formData.tasa_interes}% ${frecuenciaActual.adjetivo} sobre el capital, en cada una de las ${calculo.numCuotas} cuotas.`
+                    ? `Se cobra ${formData.tasa_interes}% ${frecuenciaActual.adjetivo} sobre el capital completo, en cada una de las ${calculo.numCuotas} cuotas.`
+                    : formData.modalidad_interes === 'amortizado'
+                    ? `Se cobra ${formData.tasa_interes}% ${frecuenciaActual.adjetivo} sobre el saldo que queda: el interés baja cuota a cuota mientras el capital se liquida.`
                     : 'Se cobra una sola vez sobre el capital, sin importar el plazo.'}
                 </p>
               </div>
@@ -656,12 +664,24 @@ export const LoansView: React.FC<LoansViewProps> = ({
                   </div>
                 ) : null}
 
+                {formData.modalidad_interes === 'amortizado' ? (
+                  <div className="flex justify-between text-sm text-slate-700">
+                    <span>Interés de la 1.ª cuota ({formData.tasa_interes}%):</span>
+                    <span className="font-bold text-slate-900">
+                      {formatCurrency(calculo.interesPorCuota)}
+                      <span className="font-normal text-slate-500"> → baja cada cuota</span>
+                    </span>
+                  </div>
+                ) : null}
+
                 <div className="flex justify-between text-sm text-slate-700">
                   <span>
                     Interés total
                     {formData.modalidad_interes === 'por_periodo'
                       ? ` (${calculo.numCuotas} × ${formData.tasa_interes}%)`
-                      : ` (${formData.tasa_interes}%)`}
+                      : formData.modalidad_interes === 'fijo_total'
+                      ? ` (${formData.tasa_interes}%)`
+                      : ''}
                     :
                   </span>
                   <span className="font-bold text-slate-900">{formatCurrency(calculo.interesTotal)}</span>
@@ -680,18 +700,56 @@ export const LoansView: React.FC<LoansViewProps> = ({
                 </div>
 
                 <p className="text-[11px] text-emerald-900/70 pt-1 leading-snug">
-                  {formData.modalidad_interes === 'por_periodo' ? (
+                  {formData.modalidad_interes === 'fijo_total' ? (
+                    'Interés único sobre el capital: no varía con el plazo ni con la frecuencia.'
+                  ) : (
                     <>
-                      Interés simple: el capital no se amortiza. Equivale a una tasa simple de{' '}
+                      {formData.modalidad_interes === 'amortizado'
+                        ? 'La tasa se cobra sobre el saldo pendiente, así que el capital se liquida cuota a cuota. '
+                        : 'Interés simple: el capital no se amortiza. '}
+                      Equivale a una tasa simple de{' '}
                       <strong>
                         {tasaAnualEquivalente(formData.tasa_interes, formData.frecuencia)}% anual
                       </strong>
                       .
                     </>
-                  ) : (
-                    'Interés único sobre el capital: no varía con el plazo ni con la frecuencia.'
                   )}
                 </p>
+
+                {/* Tabla de amortización: con la cuota fija cada pago reparte
+                    distinto entre interés y capital, y verlo es justo lo que
+                    da confianza al deudor. */}
+                {formData.modalidad_interes === 'amortizado' && (formData.monto_prestado ?? 0) > 0 ? (
+                  <details className="pt-2 border-t border-emerald-200">
+                    <summary className="text-[11px] font-bold text-emerald-800 cursor-pointer select-none">
+                      Ver tabla de amortización ({calculo.numCuotas} cuotas)
+                    </summary>
+                    <div className="mt-2 overflow-x-auto">
+                      <table className="w-full text-[11px] text-right tabular-nums">
+                        <thead>
+                          <tr className="text-emerald-900/70 border-b border-emerald-200">
+                            <th className="text-left font-semibold py-1">#</th>
+                            <th className="font-semibold py-1">Cuota</th>
+                            <th className="font-semibold py-1">Interés</th>
+                            <th className="font-semibold py-1">Capital</th>
+                            <th className="font-semibold py-1">Saldo</th>
+                          </tr>
+                        </thead>
+                        <tbody className="text-slate-700">
+                          {calculo.cuotas.map((c) => (
+                            <tr key={c.numero} className="border-b border-emerald-100 last:border-0">
+                              <td className="text-left py-1">{c.numero}</td>
+                              <td className="py-1 font-semibold">{formatCurrency(c.monto)}</td>
+                              <td className="py-1">{formatCurrency(c.interes)}</td>
+                              <td className="py-1">{formatCurrency(c.capital)}</td>
+                              <td className="py-1">{formatCurrency(c.saldo)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </details>
+                ) : null}
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-200">
@@ -757,15 +815,20 @@ export const LoansView: React.FC<LoansViewProps> = ({
                   </span>
                 </div>
                 <div className="col-span-2 pt-1 border-t border-slate-200 text-[11px] text-slate-500">
-                  {modalidadSegura(selectedPrestamo.modalidad_interes) === 'por_periodo'
-                    ? `Interés ${selectedPrestamo.tasa_interes}% ${
-                        FRECUENCIAS[frecuenciaSegura(selectedPrestamo.frecuencia)].adjetivo
-                      } sobre el capital, cobrado en cada una de las ${
-                        selectedPrestamo.num_cuotas
-                      } cuotas · ${formatCurrency(selectedPrestamo.interes_total)} en total.`
-                    : `Interés único del ${selectedPrestamo.tasa_interes}% sobre el capital · ${formatCurrency(
-                        selectedPrestamo.interes_total
-                      )} en total.`}
+                  {(() => {
+                    const modalidad = modalidadSegura(selectedPrestamo.modalidad_interes);
+                    const adjetivo =
+                      FRECUENCIAS[frecuenciaSegura(selectedPrestamo.frecuencia)].adjetivo;
+                    const enTotal = `${formatCurrency(selectedPrestamo.interes_total)} en total.`;
+
+                    if (modalidad === 'por_periodo') {
+                      return `Interés ${selectedPrestamo.tasa_interes}% ${adjetivo} sobre el capital completo, cobrado en cada una de las ${selectedPrestamo.num_cuotas} cuotas · ${enTotal}`;
+                    }
+                    if (modalidad === 'amortizado') {
+                      return `Cuota fija amortizada: ${selectedPrestamo.tasa_interes}% ${adjetivo} sobre el saldo pendiente · ${enTotal}`;
+                    }
+                    return `Interés único del ${selectedPrestamo.tasa_interes}% sobre el capital · ${enTotal}`;
+                  })()}
                 </div>
               </div>
 
@@ -819,6 +882,17 @@ export const LoansView: React.FC<LoansViewProps> = ({
                           <Calendar className="w-3 h-3 text-slate-400" />
                           Vence: {formatDate(cuota.fecha_vencimiento)}
                         </p>
+
+                        {/* Desglose de la cuota. Los préstamos creados antes
+                            de guardarlo no lo tienen: se omite en vez de
+                            mostrar ceros que no significan nada. */}
+                        {cuota.interes > 0 || cuota.capital > 0 ? (
+                          <p className="text-[11px] text-slate-500">
+                            Interés {formatCurrency(cuota.interes)} · capital{' '}
+                            {formatCurrency(cuota.capital)} · saldo{' '}
+                            {formatCurrency(cuota.saldo_capital)}
+                          </p>
+                        ) : null}
 
                         {cuota.monto_pagado > 0 && cuota.estado !== 'pagada' ? (
                           <p className="text-xs text-slate-600 font-semibold">

@@ -3,7 +3,7 @@ import type { AppState } from '../types';
 import { formatCurrency, formatDate } from '../utils/sanitizer';
 import { formatearDocumento, formatearTelefono, redondearDinero } from '../utils/validacion';
 import { descargarCSV, generarCSV, nombreConFecha } from '../utils/exportar';
-import { FRECUENCIAS, frecuenciaSegura, modalidadSegura } from '../utils/calculos';
+import { MODALIDADES, modalidadSegura } from '../utils/calculos';
 import { useFeedback } from './feedback/contexto';
 import { Download, FileSpreadsheet, X } from 'lucide-react';
 
@@ -143,9 +143,7 @@ export const ReportesModal: React.FC<ReportesModalProps> = ({ state, onClose }) 
               p.tasa_interes,
               // Sin esta columna un «10%» en el reporte sería ambiguo: puede
               // ser 10% por cuota o 10% una sola vez sobre el capital.
-              modalidadSegura(p.modalidad_interes) === 'por_periodo'
-                ? `Por cuota (${FRECUENCIAS[frecuenciaSegura(p.frecuencia)].adjetivo})`
-                : 'Único sobre el capital',
+              MODALIDADES[modalidadSegura(p.modalidad_interes)].etiqueta,
               p.interes_total,
               p.total_a_pagar,
               p.num_cuotas,

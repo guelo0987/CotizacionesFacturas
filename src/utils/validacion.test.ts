@@ -379,3 +379,31 @@ describe('soloDigitos', () => {
     expect(soloDigitos(null)).toBe('');
   });
 });
+
+describe('campos numéricos que se pueden dejar vacíos', () => {
+  // Los campos de cuotas, días y porcentajes admiten quedarse vacíos
+  // mientras se escribe (ver components/campos/CampoNumero). La red que
+  // impide guardar un hueco es la validación al enviar.
+  it('pide el número entero cuando el campo quedó vacío', () => {
+    expect(validarEntero(null, 'El número de cuotas', 1, 120)).toEqual({
+      valido: false,
+      mensaje: 'El número de cuotas es obligatorio.',
+    });
+  });
+
+  it('pide el monto cuando el campo quedó vacío', () => {
+    expect(validarMonto(null, 'El monto prestado', { min: 1 })).toEqual({
+      valido: false,
+      mensaje: 'El monto prestado es obligatorio.',
+    });
+  });
+
+  it('sigue rechazando lo que está fuera de rango', () => {
+    expect(validarEntero(500, 'El número de cuotas', 1, 120).valido).toBe(false);
+    expect(validarEntero(0, 'El número de cuotas', 1, 120).valido).toBe(false);
+  });
+
+  it('acepta un valor normal', () => {
+    expect(validarEntero(8, 'El número de cuotas', 1, 120).valido).toBe(true);
+  });
+});

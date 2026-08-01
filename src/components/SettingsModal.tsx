@@ -13,6 +13,7 @@ import {
   validarPorcentaje,
   validarTelefono,
 } from '../utils/validacion';
+import { CampoNumero } from './campos/CampoNumero';
 import { useAccionAsync } from '../hooks/useAccionAsync';
 import { useFeedback } from './feedback/contexto';
 import { AlertCircle, Building, Percent, Settings, Upload, Wrench, X } from 'lucide-react';
@@ -30,6 +31,8 @@ interface SettingsModalProps {
 const MAX_LOGO_BYTES = 2 * 1024 * 1024; // 2 MB
 const TIPOS_LOGO = ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'];
 
+type FormularioAjustes = Omit<BusinessSettings, 'itbis_rate'> & { itbis_rate: number | null };
+
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   state,
   onSaveSettings,
@@ -40,7 +43,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onDeleteServicio,
 }) => {
   const [activeTab, setActiveTab] = useState<'perfil' | 'servicios'>('perfil');
-  const [formData, setFormData] = useState<BusinessSettings>({ ...state.settings });
+  // `itbis_rate` admite `null` sólo en el formulario: el campo puede
+  // quedarse vacío mientras se escribe. Al guardar vuelve a ser un número
+  // (18% por defecto), que es lo que espera `BusinessSettings`.
+  const [formData, setFormData] = useState<FormularioAjustes>({ ...state.settings });
   const [errorForm, setErrorForm] = useState('');
   const [subiendoLogo, setSubiendoLogo] = useState(false);
 
@@ -293,27 +299,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   >
                     <Percent className="w-4 h-4 text-emerald-600" /> ITBIS por defecto
                   </label>
-                  <span className="text-sm font-black text-slate-900">{formData.itbis_rate}%</span>
+                  <span className="text-sm font-black text-slate-900">
+                    {formData.itbis_rate ?? 0}%
+                  </span>
                 </div>
-                <input
+                <CampoNumero
                   id="cfg-itbis"
-                  type="number"
-                  min={0}
-                  max={50}
-                  step="any"
                   value={formData.itbis_rate}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      itbis_rate: sanearNumero(e.target.value, {
-                        min: 0,
-                        max: 50,
-                        decimales: 2,
-                        porDefecto: 18,
-                      }),
-                    })
-                  }
-                  className="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2 text-sm text-slate-900 font-bold focus:outline-none focus:border-emerald-600 transition-all"
+                  onChange={(itbis_rate) => setFormData({ ...formData, itbis_rate })}
+                  max={50}
+                  decimales={2}
+                  sufijo="%"
+                  className="!px-3.5 text-slate-900"
                 />
                 <p className="text-xs text-slate-500">
                   Impuesto sobre Transferencias de Bienes Industrializados y Servicios. El estándar

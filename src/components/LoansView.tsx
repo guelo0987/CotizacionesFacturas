@@ -30,6 +30,7 @@ import {
   validarPorcentaje,
 } from '../utils/validacion';
 import { CampoMoneda } from './campos/CampoMoneda';
+import { CampoNumero } from './campos/CampoNumero';
 import { useAccionAsync } from '../hooks/useAccionAsync';
 import { generateWhatsappLoanCuotaUrl } from '../utils/whatsapp';
 import {
@@ -63,8 +64,8 @@ interface LoansViewProps {
 interface FormularioPrestamo {
   cliente_id: string;
   monto_prestado: number | null;
-  tasa_interes: number;
-  num_cuotas: number;
+  tasa_interes: number | null;
+  num_cuotas: number | null;
   frecuencia: FrecuenciaPrestamo;
   modalidad_interes: ModalidadInteres;
   fecha_inicio: string;
@@ -127,8 +128,8 @@ export const LoansView: React.FC<LoansViewProps> = ({
     () =>
       calcularPrestamo(
         formData.monto_prestado ?? 0,
-        formData.tasa_interes,
-        formData.num_cuotas,
+        formData.tasa_interes ?? 0,
+        formData.num_cuotas ?? 1,
         formData.modalidad_interes
       ),
     [
@@ -195,8 +196,8 @@ export const LoansView: React.FC<LoansViewProps> = ({
           max: 99999999,
           decimales: 2,
         }),
-        tasa_interes: formData.tasa_interes,
-        num_cuotas: formData.num_cuotas,
+        tasa_interes: formData.tasa_interes ?? 0,
+        num_cuotas: formData.num_cuotas ?? 1,
         frecuencia: formData.frecuencia,
         modalidad_interes: formData.modalidad_interes,
         fecha_inicio: formData.fecha_inicio,
@@ -526,25 +527,11 @@ export const LoansView: React.FC<LoansViewProps> = ({
                   <label htmlFor="pres-cuotas" className="block text-sm font-semibold text-slate-700 mb-1">
                     Número de cuotas *
                   </label>
-                  <input
+                  <CampoNumero
                     id="pres-cuotas"
-                    type="number"
-                    min={1}
-                    max={120}
-                    step={1}
                     value={formData.num_cuotas}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        num_cuotas: sanearNumero(e.target.value, {
-                          min: 1,
-                          max: 120,
-                          decimales: 0,
-                          porDefecto: 1,
-                        }),
-                      })
-                    }
-                    className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold text-slate-800 focus:outline-none focus:border-emerald-500"
+                    onChange={(num_cuotas) => setFormData({ ...formData, num_cuotas })}
+                    max={120}
                   />
                 </div>
 
@@ -598,31 +585,20 @@ export const LoansView: React.FC<LoansViewProps> = ({
                     ? 'Tasa de interés total (%) *'
                     : `Tasa de interés ${frecuenciaActual.adjetivo} (%) *`}
                 </label>
-                <input
+                <CampoNumero
                   id="pres-tasa"
-                  type="number"
-                  min={0}
-                  max={100}
-                  step="any"
                   value={formData.tasa_interes}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      tasa_interes: sanearNumero(e.target.value, {
-                        min: 0,
-                        max: 100,
-                        decimales: 2,
-                      }),
-                    })
-                  }
-                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold text-slate-800 focus:outline-none focus:border-emerald-500"
+                  onChange={(tasa_interes) => setFormData({ ...formData, tasa_interes })}
+                  max={100}
+                  decimales={2}
+                  sufijo="%"
                   aria-describedby="pres-tasa-ayuda"
                 />
                 <p id="pres-tasa-ayuda" className="text-xs text-slate-500 mt-1">
                   {formData.modalidad_interes === 'por_periodo'
-                    ? `Se cobra ${formData.tasa_interes}% ${frecuenciaActual.adjetivo} sobre el capital completo, en cada una de las ${calculo.numCuotas} cuotas.`
+                    ? `Se cobra ${formData.tasa_interes ?? 0}% ${frecuenciaActual.adjetivo} sobre el capital completo, en cada una de las ${calculo.numCuotas} cuotas.`
                     : formData.modalidad_interes === 'amortizado'
-                    ? `Se cobra ${formData.tasa_interes}% ${frecuenciaActual.adjetivo} sobre el saldo que queda: el interés baja cuota a cuota mientras el capital se liquida.`
+                    ? `Se cobra ${formData.tasa_interes ?? 0}% ${frecuenciaActual.adjetivo} sobre el saldo que queda: el interés baja cuota a cuota mientras el capital se liquida.`
                     : 'Se cobra una sola vez sobre el capital, sin importar el plazo.'}
                 </p>
               </div>
@@ -656,7 +632,7 @@ export const LoansView: React.FC<LoansViewProps> = ({
                 {formData.modalidad_interes === 'por_periodo' ? (
                   <div className="flex justify-between text-sm text-slate-700">
                     <span>
-                      Interés por cuota ({formData.tasa_interes}% {frecuenciaActual.adjetivo}):
+                      Interés por cuota ({formData.tasa_interes ?? 0}% {frecuenciaActual.adjetivo}):
                     </span>
                     <span className="font-bold text-slate-900">
                       {formatCurrency(calculo.interesPorCuota)}
@@ -666,7 +642,7 @@ export const LoansView: React.FC<LoansViewProps> = ({
 
                 {formData.modalidad_interes === 'amortizado' ? (
                   <div className="flex justify-between text-sm text-slate-700">
-                    <span>Interés de la 1.ª cuota ({formData.tasa_interes}%):</span>
+                    <span>Interés de la 1.ª cuota ({formData.tasa_interes ?? 0}%):</span>
                     <span className="font-bold text-slate-900">
                       {formatCurrency(calculo.interesPorCuota)}
                       <span className="font-normal text-slate-500"> → baja cada cuota</span>
@@ -678,9 +654,9 @@ export const LoansView: React.FC<LoansViewProps> = ({
                   <span>
                     Interés total
                     {formData.modalidad_interes === 'por_periodo'
-                      ? ` (${calculo.numCuotas} × ${formData.tasa_interes}%)`
+                      ? ` (${calculo.numCuotas} × ${formData.tasa_interes ?? 0}%)`
                       : formData.modalidad_interes === 'fijo_total'
-                      ? ` (${formData.tasa_interes}%)`
+                      ? ` (${formData.tasa_interes ?? 0}%)`
                       : ''}
                     :
                   </span>
@@ -709,7 +685,8 @@ export const LoansView: React.FC<LoansViewProps> = ({
                         : 'Interés simple: el capital no se amortiza. '}
                       Equivale a una tasa simple de{' '}
                       <strong>
-                        {tasaAnualEquivalente(formData.tasa_interes, formData.frecuencia)}% anual
+                        {tasaAnualEquivalente(formData.tasa_interes ?? 0, formData.frecuencia)}%
+                        anual
                       </strong>
                       .
                     </>

@@ -263,6 +263,9 @@ export function validarEntero(
   min: number,
   max: number
 ): Resultado {
+  if (valor === null || valor === undefined || valor === '') {
+    return error(`${etiqueta} es obligatorio.`);
+  }
   const n = aNumero(valor);
   if (n === null || !Number.isInteger(n)) return error(`${etiqueta} debe ser un número entero.`);
   if (n < min || n > max) return error(`${etiqueta} debe estar entre ${min} y ${max}.`);

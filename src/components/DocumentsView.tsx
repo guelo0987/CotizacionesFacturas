@@ -15,7 +15,6 @@ import {
   limpiarTextoMultilinea,
   primerError,
   redondearDinero,
-  sanearNumero,
   validarCantidad,
   validarFecha,
   validarMonto,
@@ -24,6 +23,7 @@ import {
   validarEntero,
 } from '../utils/validacion';
 import { CampoMoneda } from './campos/CampoMoneda';
+import { CampoNumero } from './campos/CampoNumero';
 import { useAccionAsync } from '../hooks/useAccionAsync';
 import {
   AlertCircle,
@@ -43,8 +43,16 @@ import {
 
 type SubTab = 'cotizaciones' | 'facturas';
 
-interface LineaEditable extends LineaDocumento {
+/**
+ * Línea mientras se edita. `cantidad` y `precio_unitario` admiten `null`
+ * porque el campo puede quedarse vacío: forzar un número siempre haría
+ * reaparecer un 0 pegado delante de lo que se teclee. Se convierten a
+ * número al calcular y al guardar.
+ */
+interface LineaEditable extends Omit<LineaDocumento, 'cantidad' | 'precio_unitario'> {
   clave: string;
+  cantidad: number | null;
+  precio_unitario: number | null;
 }
 
 interface DocumentsViewProps {
@@ -78,7 +86,7 @@ const lineaVacia = (): LineaEditable => ({
   servicio_id: null,
   descripcion: '',
   cantidad: 1,
-  precio_unitario: 0,
+  precio_unitario: null,
   importe: 0,
 });
 
@@ -106,7 +114,7 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
   const [formData, setFormData] = useState({
     cliente_id: '',
     fecha: hoyISO(),
-    validez_dias: 15,
+    validez_dias: 15 as number | null,
     ncf: '',
     aplica_itbis: true,
     notas: '',
@@ -201,7 +209,10 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
       items: prev.items.map((it) => {
         if (it.clave !== clave) return it;
         const fusionada = { ...it, ...cambios };
-        fusionada.importe = calcularImporteLinea(fusionada.cantidad, fusionada.precio_unitario);
+        fusionada.importe = calcularImporteLinea(
+          fusionada.cantidad ?? 0,
+          fusionada.precio_unitario ?? 0
+        );
         return fusionada;
       }),
     }));
@@ -234,7 +245,10 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
   const totales = useMemo(
     () =>
       calcularTotalesDocumento(
-        formData.items,
+        formData.items.map((it) => ({
+          cantidad: it.cantidad ?? 0,
+          precio_unitario: it.precio_unitario ?? 0,
+        })),
         formData.aplica_itbis,
         state.settings.itbis_rate
       ),
@@ -290,8 +304,8 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
     const items: LineaDocumento[] = formData.items.map((it) => ({
       servicio_id: it.servicio_id || null,
       descripcion: limpiarTexto(it.descripcion, 300),
-      cantidad: it.cantidad,
-      precio_unitario: it.precio_unitario,
+      cantidad: it.cantidad ?? 0,
+      precio_unitario: it.precio_unitario ?? 0,
       importe: it.importe,
     }));
 
@@ -304,7 +318,7 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
             id: editandoId ?? undefined,
             cliente_id: formData.cliente_id,
             fecha: formData.fecha,
-            validez_dias: formData.validez_dias,
+            validez_dias: formData.validez_dias ?? 15,
             aplica_itbis: formData.aplica_itbis,
             notas,
           },
@@ -795,24 +809,12 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
                       >
                         Validez (días)
                       </label>
-                      <input
+                      <CampoNumero
                         id="doc-validez"
-                        type="number"
-                        min={1}
-                        max={365}
                         value={formData.validez_dias}
-                        onChange={(e) =>
-                          setFormData({
-                            ...formData,
-                            validez_dias: sanearNumero(e.target.value, {
-                              min: 1,
-                              max: 365,
-                              decimales: 0,
-                              porDefecto: 15,
-                            }),
-                          })
-                        }
-                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-emerald-500"
+                        onChange={(validez_dias) => setFormData({ ...formData, validez_dias })}
+                        max={365}
+                        sufijo="días"
                       />
                     </div>
                   ) : (
@@ -921,24 +923,13 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
                       <div className="grid grid-cols-3 gap-2 text-sm">
                         <div>
                           <label className="block text-[11px] text-slate-500 mb-0.5">Cantidad</label>
-                          <input
-                            type="number"
-                            min={0.01}
-                            step="any"
+                          <CampoNumero
                             value={item.cantidad}
-                            onChange={(e) =>
-                              actualizarLinea(item.clave, {
-                                // `porDefecto: 1` para que vaciar la casilla
-                                // no deje un 0 pegado que hay que borrar.
-                                cantidad: sanearNumero(e.target.value, {
-                                  min: 0,
-                                  max: 100000,
-                                  decimales: 2,
-                                  porDefecto: 1,
-                                }),
-                              })
-                            }
-                            className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-sm text-slate-800 focus:outline-none focus:border-emerald-500"
+                            onChange={(cantidad) => actualizarLinea(item.clave, { cantidad })}
+                            max={100000}
+                            decimales={2}
+                            aria-label={`Cantidad de la línea ${idx + 1}`}
+                            className="!px-2.5 !py-1 !rounded-lg font-normal"
                           />
                         </div>
                         <div>
@@ -947,8 +938,8 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
                           </label>
                           <CampoMoneda
                             value={item.precio_unitario}
-                            onChange={(precio) =>
-                              actualizarLinea(item.clave, { precio_unitario: precio ?? 0 })
+                            onChange={(precio_unitario) =>
+                              actualizarLinea(item.clave, { precio_unitario })
                             }
                             aria-label={`Precio unitario de la línea ${idx + 1}`}
                             className="!pl-10 !py-1 !rounded-lg"

@@ -51,7 +51,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [subiendo, setSubiendo] = useState<'logo' | 'qr' | null>(null);
 
   const { ejecutando, ejecutar } = useAccionAsync();
-  const { error: avisarError } = useFeedback();
+  const { exito, error: avisarError } = useFeedback();
 
   /**
    * El logo va a Supabase Storage.
@@ -81,6 +81,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     try {
       const url = await onSubirImagen(archivo, tipo);
       setFormData((prev) => (tipo === 'logo' ? { ...prev, logo_url: url } : { ...prev, qr_url: url }));
+      exito(`${nombre} quedó guardado.`);
     } catch (err) {
       avisarError(err instanceof Error ? err.message : `No se pudo subir ${nombre.toLowerCase()}.`);
     } finally {
@@ -256,8 +257,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     ) : null}
                   </div>
                   <p className="text-xs text-slate-500">
-                    Aparece al pie de tus cotizaciones y facturas con el texto «Síguenos en
-                    nuestras redes». Opcional.
+                    Se guarda al subirlo. Aparece al pie de tus cotizaciones y facturas con el
+                    texto «Síguenos en nuestras redes». Opcional.
                   </p>
                 </div>
               </div>

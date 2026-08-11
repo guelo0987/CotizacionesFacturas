@@ -535,7 +535,16 @@ export function App() {
 
   const handleSubirImagen = async (archivo: File, tipo: 'logo' | 'qr'): Promise<string> => {
     if (!organizacionId) throw new Error('No se pudo identificar tu negocio.');
-    return supabaseDataService.subirImagenNegocio(organizacionId, archivo, tipo);
+    const url = await supabaseDataService.subirImagenNegocio(organizacionId, archivo, tipo);
+
+    // El servicio ya la guardó en la base; falta reflejarla aquí para que
+    // salga en los documentos sin tener que recargar la aplicación.
+    setState((prev) => ({
+      ...prev,
+      settings: { ...prev.settings, [tipo === 'logo' ? 'logo_url' : 'qr_url']: url },
+    }));
+
+    return url;
   };
 
   // -------------------------------------------------------------------

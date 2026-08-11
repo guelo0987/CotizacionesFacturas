@@ -162,6 +162,11 @@ export const supabaseDataService = {
    * Sube una imagen del negocio (logo o código QR) y devuelve su URL
    * pública. Ambas van al mismo bucket, dentro de la carpeta de la
    * organización, que es lo que filtran las políticas de Storage.
+   *
+   * La URL se guarda aquí mismo, sin esperar al botón «Guardar perfil»:
+   * el archivo ya está subido, así que dejar la referencia sin guardar
+   * hacía creer que la imagen estaba puesta cuando en realidad se perdía
+   * al cerrar los ajustes.
    */
   async subirImagenNegocio(
     organizacionId: string,
@@ -186,7 +191,21 @@ export const supabaseDataService = {
 
     const { data } = supabase.storage.from('logos').getPublicUrl(ruta);
     // El parámetro fuerza al navegador a soltar la versión anterior en caché
-    return `${data.publicUrl}?v=${Date.now()}`;
+    const url = `${data.publicUrl}?v=${Date.now()}`;
+
+    // La fila de configuración se crea junto con la organización
+    // (`crear_organizacion`), así que siempre hay algo que actualizar.
+    const { error: errorGuardado } = await supabase
+      .from('configuracion_negocio')
+      .update({
+        [tipo === 'logo' ? 'logo_url' : 'qr_url']: url,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('organizacion_id', organizacionId);
+
+    if (errorGuardado) throw traducir(errorGuardado, `guardar ${etiqueta}`);
+
+    return url;
   },
 
   // ===================================================================

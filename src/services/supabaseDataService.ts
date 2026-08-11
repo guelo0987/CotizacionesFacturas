@@ -121,7 +121,7 @@ export const supabaseDataService = {
     const supabase = requireSupabaseClient();
     const { data, error } = await supabase
       .from('configuracion_negocio')
-      .select('business_name, phone, email, address, documento, logo_url, itbis_rate, currency')
+      .select('business_name, phone, email, address, documento, logo_url, qr_url, itbis_rate, currency')
       .maybeSingle();
 
     if (error) throw traducir(error, 'cargar la configuración');
@@ -134,6 +134,7 @@ export const supabaseDataService = {
       address: data.address ?? '',
       documento: data.documento ?? '',
       logo_url: data.logo_url ?? '',
+      qr_url: data.qr_url ?? '',
       itbis_rate: Number(data.itbis_rate ?? 18),
       currency: data.currency ?? 'RD$',
     };
@@ -157,11 +158,20 @@ export const supabaseDataService = {
     return { ...settings, itbis_rate: Number(data.itbis_rate) };
   },
 
-  /** Sube el logo a Storage y devuelve su URL pública. */
-  async subirLogo(organizacionId: string, archivo: File): Promise<string> {
+  /**
+   * Sube una imagen del negocio (logo o código QR) y devuelve su URL
+   * pública. Ambas van al mismo bucket, dentro de la carpeta de la
+   * organización, que es lo que filtran las políticas de Storage.
+   */
+  async subirImagenNegocio(
+    organizacionId: string,
+    archivo: File,
+    tipo: 'logo' | 'qr'
+  ): Promise<string> {
     const supabase = requireSupabaseClient();
     const extension = archivo.name.split('.').pop()?.toLowerCase() || 'png';
-    const ruta = `${organizacionId}/logo.${extension}`;
+    const ruta = `${organizacionId}/${tipo}.${extension}`;
+    const etiqueta = tipo === 'logo' ? 'el logo' : 'el código QR';
 
     const { error } = await supabase.storage
       .from('logos')
@@ -169,7 +179,7 @@ export const supabaseDataService = {
 
     if (error) {
       throw new ErrorDatos(
-        `No se pudo subir el logo. ${error.message}`,
+        `No se pudo subir ${etiqueta}. ${error.message}`,
         error instanceof Error ? error : undefined
       );
     }

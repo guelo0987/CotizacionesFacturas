@@ -172,6 +172,8 @@ export interface BusinessSettings {
   address: string;
   documento: string; // RNC del negocio
   logo_url: string;
+  /** Código QR del negocio (redes, catálogo, pago). Sale en los documentos. */
+  qr_url: string;
   itbis_rate: number; // Por defecto 18%
   currency: string; // RD$
 }

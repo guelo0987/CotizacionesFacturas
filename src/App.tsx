@@ -533,9 +533,9 @@ export function App() {
     exito('Perfil del negocio guardado.');
   };
 
-  const handleSubirLogo = async (archivo: File): Promise<string> => {
+  const handleSubirImagen = async (archivo: File, tipo: 'logo' | 'qr'): Promise<string> => {
     if (!organizacionId) throw new Error('No se pudo identificar tu negocio.');
-    return supabaseDataService.subirLogo(organizacionId, archivo);
+    return supabaseDataService.subirImagenNegocio(organizacionId, archivo, tipo);
   };
 
   // -------------------------------------------------------------------
@@ -643,7 +643,7 @@ export function App() {
         <SettingsModal
           state={state}
           onSaveSettings={handleSaveSettings}
-          onSubirLogo={handleSubirLogo}
+          onSubirImagen={handleSubirImagen}
           onClose={() => setIsSettingsOpen(false)}
           onAddServicio={handleAddServicio}
           onUpdateServicio={handleUpdateServicio}

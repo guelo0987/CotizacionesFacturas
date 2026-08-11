@@ -16,27 +16,27 @@ import {
 import { CampoNumero } from './campos/CampoNumero';
 import { useAccionAsync } from '../hooks/useAccionAsync';
 import { useFeedback } from './feedback/contexto';
-import { AlertCircle, Building, Percent, Settings, Upload, Wrench, X } from 'lucide-react';
+import { AlertCircle, Building, Percent, QrCode, Settings, Upload, Wrench, X } from 'lucide-react';
 
 interface SettingsModalProps {
   state: AppState;
   onSaveSettings: (settings: BusinessSettings) => Promise<void>;
-  onSubirLogo: (archivo: File) => Promise<string>;
+  onSubirImagen: (archivo: File, tipo: 'logo' | 'qr') => Promise<string>;
   onClose: () => void;
   onAddServicio: (servicio: Omit<Servicio, 'id' | 'created_at'>) => Promise<void>;
   onUpdateServicio: (servicio: Servicio) => Promise<void>;
   onDeleteServicio: (id: string) => Promise<void>;
 }
 
-const MAX_LOGO_BYTES = 2 * 1024 * 1024; // 2 MB
-const TIPOS_LOGO = ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'];
+const MAX_IMAGEN_BYTES = 2 * 1024 * 1024; // 2 MB
+const TIPOS_IMAGEN = ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'];
 
 type FormularioAjustes = Omit<BusinessSettings, 'itbis_rate'> & { itbis_rate: number | null };
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   state,
   onSaveSettings,
-  onSubirLogo,
+  onSubirImagen,
   onClose,
   onAddServicio,
   onUpdateServicio,
@@ -48,7 +48,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   // (18% por defecto), que es lo que espera `BusinessSettings`.
   const [formData, setFormData] = useState<FormularioAjustes>({ ...state.settings });
   const [errorForm, setErrorForm] = useState('');
-  const [subiendoLogo, setSubiendoLogo] = useState(false);
+  const [subiendo, setSubiendo] = useState<'logo' | 'qr' | null>(null);
 
   const { ejecutando, ejecutar } = useAccionAsync();
   const { error: avisarError } = useFeedback();
@@ -60,29 +60,31 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
    * foto de 2 MB ocupaba ~2,7 MB de texto, agotaba la cuota del navegador y
    * a partir de ahí la aplicación dejaba de guardar todo en silencio.
    */
-  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const subirImagen = (tipo: 'logo' | 'qr') => async (e: React.ChangeEvent<HTMLInputElement>) => {
     const archivo = e.target.files?.[0];
     e.target.value = '';
     if (!archivo) return;
 
-    if (!TIPOS_LOGO.includes(archivo.type)) {
-      setErrorForm('El logo debe ser una imagen PNG, JPG, WEBP o SVG.');
+    const nombre = tipo === 'logo' ? 'El logo' : 'El código QR';
+
+    if (!TIPOS_IMAGEN.includes(archivo.type)) {
+      setErrorForm(`${nombre} debe ser una imagen PNG, JPG, WEBP o SVG.`);
       return;
     }
-    if (archivo.size > MAX_LOGO_BYTES) {
-      setErrorForm('El logo no puede pasar de 2 MB. Reduce la imagen e inténtalo otra vez.');
+    if (archivo.size > MAX_IMAGEN_BYTES) {
+      setErrorForm(`${nombre} no puede pasar de 2 MB. Reduce la imagen e inténtalo otra vez.`);
       return;
     }
 
-    setSubiendoLogo(true);
+    setSubiendo(tipo);
     setErrorForm('');
     try {
-      const url = await onSubirLogo(archivo);
-      setFormData((prev) => ({ ...prev, logo_url: url }));
+      const url = await onSubirImagen(archivo, tipo);
+      setFormData((prev) => (tipo === 'logo' ? { ...prev, logo_url: url } : { ...prev, qr_url: url }));
     } catch (err) {
-      avisarError(err instanceof Error ? err.message : 'No se pudo subir el logo.');
+      avisarError(err instanceof Error ? err.message : `No se pudo subir ${nombre.toLowerCase()}.`);
     } finally {
-      setSubiendoLogo(false);
+      setSubiendo(null);
     }
   };
 
@@ -193,20 +195,70 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <span className="block text-sm font-bold text-slate-700">Logo del negocio</span>
                   <label
                     className={`inline-flex items-center gap-1.5 bg-white hover:bg-slate-100 text-slate-700 text-sm px-3.5 py-2 rounded-xl transition-all font-semibold border border-slate-200 ${
-                      subiendoLogo ? 'opacity-60 cursor-wait' : 'cursor-pointer'
+                      subiendo === 'logo' ? 'opacity-60 cursor-wait' : 'cursor-pointer'
                     }`}
                   >
                     <Upload className="w-3.5 h-3.5 text-emerald-600" />
-                    {subiendoLogo ? 'Subiendo…' : 'Subir imagen'}
+                    {subiendo === 'logo' ? 'Subiendo…' : 'Subir imagen'}
                     <input
                       type="file"
-                      accept={TIPOS_LOGO.join(',')}
-                      onChange={handleLogoUpload}
-                      disabled={subiendoLogo}
+                      accept={TIPOS_IMAGEN.join(',')}
+                      onChange={subirImagen('logo')}
+                      disabled={subiendo !== null}
                       className="hidden"
                     />
                   </label>
                   <p className="text-xs text-slate-500">PNG, JPG, WEBP o SVG. Máximo 2 MB.</p>
+                </div>
+              </div>
+
+              {/* Código QR: sale al pie de cotizaciones y facturas, para que
+                  el cliente escanee y llegue a las redes del negocio. */}
+              <div className="flex items-center gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                {formData.qr_url ? (
+                  <img
+                    src={formData.qr_url}
+                    alt="Código QR del negocio"
+                    className="w-16 h-16 rounded-2xl object-contain bg-white border border-slate-200 p-1"
+                  />
+                ) : (
+                  <div className="w-16 h-16 rounded-2xl bg-white border border-dashed border-slate-300 flex items-center justify-center text-slate-400">
+                    <QrCode className="w-6 h-6" />
+                  </div>
+                )}
+
+                <div className="space-y-1 min-w-0">
+                  <span className="block text-sm font-bold text-slate-700">Código QR</span>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <label
+                      className={`inline-flex items-center gap-1.5 bg-white hover:bg-slate-100 text-slate-700 text-sm px-3.5 py-2 rounded-xl transition-all font-semibold border border-slate-200 ${
+                        subiendo === 'qr' ? 'opacity-60 cursor-wait' : 'cursor-pointer'
+                      }`}
+                    >
+                      <Upload className="w-3.5 h-3.5 text-emerald-600" />
+                      {subiendo === 'qr' ? 'Subiendo…' : 'Subir imagen'}
+                      <input
+                        type="file"
+                        accept={TIPOS_IMAGEN.join(',')}
+                        onChange={subirImagen('qr')}
+                        disabled={subiendo !== null}
+                        className="hidden"
+                      />
+                    </label>
+                    {formData.qr_url ? (
+                      <button
+                        type="button"
+                        onClick={() => setFormData((prev) => ({ ...prev, qr_url: '' }))}
+                        className="text-xs font-semibold text-slate-500 hover:text-red-600"
+                      >
+                        Quitar
+                      </button>
+                    ) : null}
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    Aparece al pie de tus cotizaciones y facturas con el texto «Síguenos en
+                    nuestras redes». Opcional.
+                  </p>
                 </div>
               </div>
 
@@ -321,7 +373,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <div className="pt-2 flex justify-end">
                 <button
                   type="submit"
-                  disabled={ejecutando || subiendoLogo}
+                  disabled={ejecutando || subiendo !== null}
                   className="px-6 py-2.5 rounded-2xl text-sm font-bold bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white transition-all shadow-md shadow-emerald-600/20"
                 >
                   {ejecutando ? 'Guardando…' : 'Guardar perfil'}

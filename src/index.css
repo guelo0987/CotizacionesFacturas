@@ -44,8 +44,11 @@
    DOM que la vista previa, así que si el documento cambiara de forma según
    el ancho de la pantalla, la misma factura llegaría distinta al cliente
    según se enviara desde un móvil o desde un ordenador.
+
+   El recibo térmico fija su propio ancho en línea, a partir de la
+   definición del formato (ver utils/formatosImpresion.ts).
    ------------------------------------------------------------------- */
-.printable-pdf {
+.documento-a4 {
   width: 720px;
 }
 
@@ -74,10 +77,9 @@
    colores que la vista previa— en vez de copiar el HTML a otra ventana.
    ------------------------------------------------------------------- */
 @media print {
-  @page {
-    size: A4 portrait;
-    margin: 12mm;
-  }
+  /* El tamaño de página lo inyecta `printDocumentElement` según el formato
+     elegido (A4, rollo de 80 mm o de 58 mm): `@page` no se puede
+     condicionar con una clase. */
 
   body {
     background: #fff !important;
@@ -118,17 +120,28 @@
     display: none !important;
   }
 
-  /* En papel el documento ocupa el ancho útil de la página, pero conserva
-     su composición de dos columnas: es el mismo nodo, sin puntos de corte
-     responsivos de por medio. */
   body.imprimiendo .zona-impresion {
     display: block !important;
-    width: 100% !important;
-    max-width: none !important;
     margin: 0 !important;
     border: 0 !important;
     border-radius: 0 !important;
     box-shadow: none !important;
+  }
+
+  /* La hoja se estira al ancho útil de la página, pero conserva su
+     composición de dos columnas: es el mismo nodo, sin puntos de corte
+     responsivos de por medio. */
+  body.imprimiendo .zona-impresion.documento-a4 {
+    width: 100% !important;
+    max-width: none !important;
+  }
+
+  /* El recibo térmico NO se estira: su ancho en píxeles ya equivale
+     exactamente a los milímetros del rollo (272 px = 72 mm, 181 px =
+     48 mm). Dejarlo al 100% lo ataría al tamaño de página que decida el
+     navegador, y la letra —que sí es de tamaño fijo— dejaría de cuadrar. */
+  body.imprimiendo .zona-impresion.documento-termico {
+    margin: 0 auto !important;
   }
 
   /* Imprimir los fondos y colores tal cual se ven en pantalla: sin esto el

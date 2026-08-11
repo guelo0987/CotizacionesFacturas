@@ -17,6 +17,7 @@ export const DEFAULT_SETTINGS: BusinessSettings = {
   address: '',
   documento: '',
   logo_url: '',
+  qr_url: '',
   itbis_rate: 18,
   currency: 'RD$',
 };

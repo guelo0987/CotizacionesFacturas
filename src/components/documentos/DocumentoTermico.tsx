@@ -2,7 +2,7 @@ import React from 'react';
 import type { Cotizacion, Factura, Cliente, BusinessSettings } from '../../types';
 import { formatCurrency, formatDate, formatDocumento, formatTelefono } from '../../utils/sanitizer';
 import { describirNCF } from '../../utils/validacion';
-import { FORMATOS, type FormatoImpresion } from '../../utils/formatosImpresion';
+import { FORMATOS, PX_POR_MM, type FormatoImpresion } from '../../utils/formatosImpresion';
 
 interface DocumentoTermicoProps {
   id: string;
@@ -43,6 +43,15 @@ export const DocumentoTermico: React.FC<DocumentoTermicoProps> = ({
 
   const anchoPx = FORMATOS[formato].anchoPx;
   const estrecho = formato === '58mm';
+
+  /**
+   * El QR se mide por su ancho, no encajado en un cuadro: la imagen trae
+   * la etiqueta «SCAN ME» debajo, así que meterla en un cuadrado dejaba
+   * los módulos del código a ~19 mm, al límite de lo que un lector saca de
+   * un papel térmico. A 40 mm (32 mm en el rollo estrecho) se lee sin
+   * pelear con él.
+   */
+  const anchoQrPx = Math.round((estrecho ? 32 : 40) * PX_POR_MM);
   const base = estrecho ? 'text-[9px]' : 'text-[10px]';
 
   /**
@@ -78,7 +87,7 @@ export const DocumentoTermico: React.FC<DocumentoTermicoProps> = ({
           <img
             src={settings.logo_url}
             alt=""
-            className={`${estrecho ? 'max-h-10' : 'max-h-12'} object-contain mx-auto mb-1`}
+            className={`${estrecho ? 'max-h-20' : 'max-h-24'} object-contain mx-auto mb-1`}
           />
         ) : null}
         <div className={`${titulo} font-bold uppercase leading-tight`}>
@@ -196,7 +205,8 @@ export const DocumentoTermico: React.FC<DocumentoTermicoProps> = ({
           <img
             src={settings.qr_url}
             alt="Código QR del negocio"
-            className={`${estrecho ? 'w-20 h-20' : 'w-24 h-24'} object-contain mx-auto`}
+            style={{ width: anchoQrPx }}
+            className="h-auto mx-auto"
           />
           <div className="font-bold mt-0.5">Síguenos en nuestras redes</div>
         </div>

@@ -2,6 +2,7 @@ import React from 'react';
 import type { Cotizacion, Factura, Cliente, BusinessSettings } from '../../types';
 import { formatCurrency, formatDate, formatDocumento, formatTelefono } from '../../utils/sanitizer';
 import { describirNCF } from '../../utils/validacion';
+import { DatosNegocioA4, PieDocumentoA4, TituloDocumentoA4 } from './piezas';
 
 interface DocumentoProps {
   id: string;
@@ -31,30 +32,12 @@ export const DocumentoA4: React.FC<DocumentoProps> = ({ id, type, doc, cliente, 
     >
       {/* Cabecera */}
       <div className="flex justify-between items-start border-b border-slate-200 pb-5 gap-4">
-        <div className="space-y-1.5">
-          {settings.logo_url ? (
-            <img src={settings.logo_url} alt="" className="max-h-16 rounded object-contain mb-2" />
-          ) : null}
-          <h1 className="text-xl font-black text-slate-900 tracking-tight leading-tight">
-            {settings.business_name || 'Nombre del negocio'}
-          </h1>
-          {settings.documento ? (
-            <p className="text-xs text-slate-600 font-mono">
-              RNC: {formatDocumento(settings.documento)}
-            </p>
-          ) : null}
-          <p className="text-xs text-slate-600">
-            {settings.address ? `${settings.address} · ` : ''}
-            {formatTelefono(settings.phone)}
-          </p>
-          {settings.email ? <p className="text-xs text-slate-600">{settings.email}</p> : null}
-        </div>
+        <DatosNegocioA4 settings={settings} />
 
-        <div className="text-right space-y-1 bg-slate-50 p-3 rounded-lg border border-slate-200 min-w-[200px]">
-          <h2 className="text-lg font-black text-slate-900 uppercase tracking-wide">
-            {isInvoice ? 'FACTURA DE VENTA' : 'COTIZACIÓN'}
-          </h2>
-          <div className="text-sm font-bold text-emerald-700 font-mono">{doc.numero}</div>
+        <TituloDocumentoA4
+          titulo={isInvoice ? 'FACTURA DE VENTA' : 'COTIZACIÓN'}
+          numero={doc.numero}
+        >
           {invoice?.ncf ? (
             <div className="text-xs font-mono text-slate-700 font-semibold">
               NCF: {invoice.ncf}
@@ -73,7 +56,7 @@ export const DocumentoA4: React.FC<DocumentoProps> = ({ id, type, doc, cliente, 
               Validez: <span className="font-semibold">{quote.validez_dias} días</span>
             </div>
           ) : null}
-        </div>
+        </TituloDocumentoA4>
       </div>
 
       {/* Cliente */}
@@ -192,25 +175,8 @@ export const DocumentoA4: React.FC<DocumentoProps> = ({ id, type, doc, cliente, 
         </div>
       ) : null}
 
-      <div className="pt-6 border-t border-slate-200 flex items-end justify-between gap-4">
-        <div className="text-[10px] text-slate-400">
-          Documento generado electrónicamente por{' '}
-          {settings.business_name || 'Sistema de Cotizaciones y Facturas'}.
-        </div>
+      <PieDocumentoA4 settings={settings} />
 
-        {settings.qr_url ? (
-          <div className="text-center shrink-0">
-            <img
-              src={settings.qr_url}
-              alt="Código QR del negocio"
-              className="w-24 h-24 object-contain mx-auto"
-            />
-            <div className="text-[10px] font-semibold text-slate-600 mt-1">
-              Síguenos en nuestras redes
-            </div>
-          </div>
-        ) : null}
-      </div>
     </div>
   );
 };

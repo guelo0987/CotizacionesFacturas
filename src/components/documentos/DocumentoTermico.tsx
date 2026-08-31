@@ -2,7 +2,15 @@ import React from 'react';
 import type { Cotizacion, Factura, Cliente, BusinessSettings } from '../../types';
 import { formatCurrency, formatDate, formatDocumento, formatTelefono } from '../../utils/sanitizer';
 import { describirNCF } from '../../utils/validacion';
-import { FORMATOS, PX_POR_MM, type FormatoImpresion } from '../../utils/formatosImpresion';
+import type { FormatoImpresion } from '../../utils/formatosImpresion';
+import {
+  CabeceraTermica,
+  FilaTermica,
+  HojaTermica,
+  PieTermico,
+  Separador,
+} from './piezas';
+import { montoTermico } from '../../utils/formatoTermico';
 
 interface DocumentoTermicoProps {
   id: string;
@@ -12,11 +20,6 @@ interface DocumentoTermicoProps {
   settings: BusinessSettings;
   formato: FormatoImpresion;
 }
-
-/** Separador de guiones, como el de un recibo de caja. */
-const Separador: React.FC = () => (
-  <div aria-hidden="true" className="border-t border-dashed border-black my-1.5" />
-);
 
 /**
  * Cotización o factura en rollo térmico (80 mm y 58 mm).
@@ -41,63 +44,14 @@ export const DocumentoTermico: React.FC<DocumentoTermicoProps> = ({
   const quote = !isInvoice ? (doc as Cotizacion) : null;
   const items = doc.items ?? [];
 
-  const anchoPx = FORMATOS[formato].anchoPx;
   const estrecho = formato === '58mm';
-
-  /**
-   * El QR se mide por su ancho, no encajado en un cuadro: la imagen trae
-   * la etiqueta «SCAN ME» debajo, así que meterla en un cuadrado dejaba
-   * los módulos del código a ~19 mm, al límite de lo que un lector saca de
-   * un papel térmico. A 40 mm (32 mm en el rollo estrecho) se lee sin
-   * pelear con él.
-   */
-  const anchoQrPx = Math.round((estrecho ? 32 : 40) * PX_POR_MM);
-  const base = estrecho ? 'text-[9px]' : 'text-[10px]';
-
-  /**
-   * En 48 mm de ancho no caben dos importes con «RD$» delante en el mismo
-   * renglón, así que en el rollo estrecho se deja sólo la cifra. La
-   * moneda queda clara en el TOTAL, que sí lo lleva.
-   */
-  const monto = (valor: number) =>
-    estrecho ? formatCurrency(valor).replace(/^RD\$\s?/, '') : formatCurrency(valor);
+  const monto = (valor: number) => montoTermico(formatCurrency(valor), estrecho);
   const titulo = estrecho ? 'text-[12px]' : 'text-[14px]';
   const total = estrecho ? 'text-[11px]' : 'text-[13px]';
 
-  const Fila: React.FC<{ etiqueta: string; valor: string; fuerte?: boolean }> = ({
-    etiqueta,
-    valor,
-    fuerte,
-  }) => (
-    <div className={`flex justify-between gap-2 ${fuerte ? 'font-bold' : ''}`}>
-      <span>{etiqueta}</span>
-      <span className="tabular-nums whitespace-nowrap">{valor}</span>
-    </div>
-  );
-
   return (
-    <div
-      id={id}
-      style={{ width: anchoPx }}
-      className={`documento-termico bg-white text-black font-mono ${base} leading-tight mx-auto`}
-    >
-      {/* Cabecera centrada */}
-      <div className="text-center space-y-0.5">
-        {settings.logo_url ? (
-          <img
-            src={settings.logo_url}
-            alt=""
-            className={`${estrecho ? 'max-h-20' : 'max-h-24'} object-contain mx-auto mb-1`}
-          />
-        ) : null}
-        <div className={`${titulo} font-bold uppercase leading-tight`}>
-          {settings.business_name || 'Nombre del negocio'}
-        </div>
-        {settings.documento ? <div>RNC: {formatDocumento(settings.documento)}</div> : null}
-        {settings.address ? <div>{settings.address}</div> : null}
-        {settings.phone ? <div>Tel: {formatTelefono(settings.phone)}</div> : null}
-        {settings.email ? <div className="break-all">{settings.email}</div> : null}
-      </div>
+    <HojaTermica id={id} formato={formato}>
+      <CabeceraTermica settings={settings} estrecho={estrecho} />
 
       <Separador />
 
@@ -157,9 +111,9 @@ export const DocumentoTermico: React.FC<DocumentoTermicoProps> = ({
 
       {/* Totales */}
       <div className="space-y-0.5">
-        <Fila etiqueta="Subtotal:" valor={monto(doc.subtotal)} />
+        <FilaTermica etiqueta="Subtotal:" valor={monto(doc.subtotal)} />
         {doc.aplica_itbis ? (
-          <Fila etiqueta={`ITBIS (${settings.itbis_rate}%):`} valor={monto(doc.itbis)} />
+          <FilaTermica etiqueta={`ITBIS (${settings.itbis_rate}%):`} valor={monto(doc.itbis)} />
         ) : null}
         <div className={`${total} font-bold flex justify-between gap-2 pt-1 border-t border-black`}>
           <span>TOTAL:</span>
@@ -168,8 +122,8 @@ export const DocumentoTermico: React.FC<DocumentoTermicoProps> = ({
 
         {invoice ? (
           <>
-            <Fila etiqueta="Pagado:" valor={monto(invoice.monto_pagado)} />
-            <Fila etiqueta="Saldo:" valor={monto(invoice.saldo_pendiente)} fuerte />
+            <FilaTermica etiqueta="Pagado:" valor={monto(invoice.monto_pagado)} />
+            <FilaTermica etiqueta="Saldo:" valor={monto(invoice.saldo_pendiente)} fuerte />
           </>
         ) : null}
       </div>
@@ -199,22 +153,7 @@ export const DocumentoTermico: React.FC<DocumentoTermicoProps> = ({
         {doc.notas || 'Gracias por su preferencia.'}
       </div>
 
-      {/* Código QR del negocio */}
-      {settings.qr_url ? (
-        <div className="text-center mt-2">
-          <img
-            src={settings.qr_url}
-            alt="Código QR del negocio"
-            style={{ width: anchoQrPx }}
-            className="h-auto mx-auto"
-          />
-          <div className="font-bold mt-0.5">Síguenos en nuestras redes</div>
-        </div>
-      ) : null}
-
-      {/* El rollo necesita aire al final: la cuchilla corta unos milímetros
-          por debajo del último punto impreso. */}
-      <div className="h-6" />
-    </div>
+      <PieTermico settings={settings} estrecho={estrecho} />
+    </HojaTermica>
   );
 };

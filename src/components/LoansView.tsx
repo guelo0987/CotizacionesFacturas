@@ -30,6 +30,7 @@ import {
   validarPorcentaje,
 } from '../utils/validacion';
 import { CampoMoneda } from './campos/CampoMoneda';
+import { PrestamoPdfModal, type DocumentoPrestamo } from './PrestamoPdfModal';
 import { CampoNumero } from './campos/CampoNumero';
 import { useAccionAsync } from '../hooks/useAccionAsync';
 import { generateWhatsappLoanCuotaUrl } from '../utils/whatsapp';
@@ -42,6 +43,8 @@ import {
   Info,
   Landmark,
   Plus,
+  Printer,
+  Receipt,
   Search,
   Share2,
   TrendingUp,
@@ -94,6 +97,8 @@ export const LoansView: React.FC<LoansViewProps> = ({
   const [selectedPrestamoId, setSelectedPrestamoId] = useState<string | null>(null);
   const [formData, setFormData] = useState(FORM_INICIAL);
   const [errorForm, setErrorForm] = useState('');
+
+  const [documentoPdf, setDocumentoPdf] = useState<DocumentoPrestamo | null>(null);
 
   const [cuotaPagoId, setCuotaPagoId] = useState<string | null>(null);
   const [pagoMonto, setPagoMonto] = useState<number | null>(null);
@@ -768,13 +773,24 @@ export const LoansView: React.FC<LoansViewProps> = ({
                   {nombreCliente(selectedPrestamo.cliente_id)}
                 </h3>
               </div>
-              <button
-                onClick={() => setSelectedPrestamoId(null)}
-                className="text-slate-400 hover:text-slate-700 p-1 shrink-0"
-                aria-label="Cerrar detalle"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  onClick={() =>
+                    setDocumentoPdf({ tipo: 'prestamo', prestamo: selectedPrestamo })
+                  }
+                  className="flex items-center gap-1 text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-2.5 py-1 rounded-lg transition-colors text-xs font-semibold"
+                  title="Comprobante del préstamo con su calendario de cuotas"
+                >
+                  <Printer className="w-3.5 h-3.5 text-emerald-600" /> Comprobante
+                </button>
+                <button
+                  onClick={() => setSelectedPrestamoId(null)}
+                  className="text-slate-400 hover:text-slate-700 p-1"
+                  aria-label="Cerrar detalle"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             <div className="space-y-3 overflow-y-auto pr-1 flex-1">
@@ -817,6 +833,13 @@ export const LoansView: React.FC<LoansViewProps> = ({
                 {selectedPrestamo.cuotas?.map((cuota) => {
                   const restante = redondearDinero(cuota.monto - (cuota.monto_pagado || 0));
                   const cli = state.clientes.find((c) => c.id === selectedPrestamo.cliente_id);
+
+                  // El recibo se emite sobre el último abono de la cuota:
+                  // es el que el cliente acaba de hacer y viene a llevarse.
+                  const ultimoAbono =
+                    (selectedPrestamo.pagos ?? [])
+                      .filter((pago) => pago.cuota_id === cuota.id)
+                      .sort((a, b) => (a.fecha < b.fecha ? 1 : -1))[0] ?? null;
                   const recordatorio = generateWhatsappLoanCuotaUrl(
                     selectedPrestamo,
                     cuota,
@@ -898,6 +921,24 @@ export const LoansView: React.FC<LoansViewProps> = ({
                             </span>
                           )}
 
+                          {ultimoAbono ? (
+                            <button
+                              onClick={() =>
+                                setDocumentoPdf({
+                                  tipo: 'abono',
+                                  prestamo: selectedPrestamo,
+                                  cuota,
+                                  pago: ultimoAbono,
+                                })
+                              }
+                              className="p-1 text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-md border border-slate-200"
+                              title={`Recibo del abono de ${formatCurrency(ultimoAbono.monto)}`}
+                              aria-label={`Recibo del abono de la cuota ${cuota.numero}`}
+                            >
+                              <Receipt className="w-3 h-3" />
+                            </button>
+                          ) : null}
+
                           <a
                             href={recordatorio}
                             target="_blank"
@@ -951,6 +992,16 @@ export const LoansView: React.FC<LoansViewProps> = ({
             </div>
           </div>
         </div>
+      ) : null}
+
+      {/* Comprobante del préstamo o recibo de abono */}
+      {documentoPdf ? (
+        <PrestamoPdfModal
+          documento={documentoPdf}
+          cliente={state.clientes.find((c) => c.id === documentoPdf.prestamo.cliente_id)}
+          settings={state.settings}
+          onClose={() => setDocumentoPdf(null)}
+        />
       ) : null}
 
       {/* Abono a una cuota */}

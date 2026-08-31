@@ -1,4 +1,4 @@
-import type { Cotizacion, Factura, Prestamo, Cuota, Cliente, BusinessSettings } from '../types';
+import type { Cotizacion, Factura, Prestamo, Cuota, Pago, Cliente, BusinessSettings } from '../types';
 import { formatCurrency, formatDate } from './sanitizer';
 import { telefonoParaWhatsapp } from './validacion';
 
@@ -82,6 +82,53 @@ export function mensajeDocumento(
   return tipo === 'factura'
     ? mensajeFactura(doc as Factura, cliente, settings)
     : mensajeCotizacion(doc as Cotizacion, cliente, settings);
+}
+
+/** Resumen del préstamo para acompañar a su comprobante en PDF. */
+export function mensajePrestamo(
+  prestamo: Prestamo,
+  cliente?: Cliente,
+  settings?: BusinessSettings
+): string {
+  const businessName = settings?.business_name || 'Nuestro negocio';
+
+  let msg = `*Comprobante de préstamo — ${businessName}*\n\n`;
+  msg += `Hola *${cliente?.nombre || 'Cliente'}*,\n`;
+  msg += `Le enviamos el detalle de su préstamo:\n\n`;
+  msg += `💵 *Capital prestado:* ${formatCurrency(prestamo.monto_prestado)}\n`;
+  msg += `📊 *Interés total:* ${formatCurrency(prestamo.interes_total)}\n`;
+  msg += `💰 *Total a pagar:* ${formatCurrency(prestamo.total_a_pagar)}\n`;
+  msg += `🗓️ *Cuotas:* ${prestamo.num_cuotas} (${prestamo.frecuencia})\n`;
+  msg += `📅 *Inicio:* ${formatDate(prestamo.fecha_inicio)}\n\n`;
+  msg += `Adjuntamos el comprobante con el calendario completo de cuotas.\n¡Gracias por su confianza!`;
+
+  return msg;
+}
+
+/** Resumen del abono para acompañar al recibo en PDF. */
+export function mensajeAbono(
+  prestamo: Prestamo,
+  cuota: Cuota,
+  pago: Pago,
+  cliente?: Cliente,
+  settings?: BusinessSettings
+): string {
+  const businessName = settings?.business_name || 'Nuestro negocio';
+  const abonado = (prestamo.cuotas ?? []).reduce((a, c) => a + (c.monto_pagado || 0), 0);
+  const saldo = Math.max(0, prestamo.total_a_pagar - abonado);
+
+  let msg = `*Recibo de abono — ${businessName}*\n\n`;
+  msg += `Hola *${cliente?.nombre || 'Cliente'}*,\n`;
+  msg += `Confirmamos su pago:\n\n`;
+  msg += `✅ *Monto recibido:* ${formatCurrency(pago.monto)}\n`;
+  msg += `📅 *Fecha:* ${formatDate(pago.fecha)}\n`;
+  msg += `🧾 *Cuota:* #${cuota.numero} de ${prestamo.num_cuotas}\n`;
+  msg += saldo > 0
+    ? `📌 *Saldo del préstamo:* ${formatCurrency(saldo)}\n\n`
+    : `🟢 *PRÉSTAMO SALDADO POR COMPLETO*\n\n`;
+  msg += `Adjuntamos el recibo. ¡Gracias por su puntualidad!`;
+
+  return msg;
 }
 
 export function generateWhatsappLoanCuotaUrl(

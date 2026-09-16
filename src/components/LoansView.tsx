@@ -22,6 +22,7 @@ import {
   moraPendiente,
   moraPendientePrestamo,
   modoMoraSeguro,
+  simularMora,
   frecuenciaSegura,
   modalidadSegura,
   tasaAnualEquivalente,
@@ -75,7 +76,8 @@ interface LoansViewProps {
     prestamoId: string,
     activa: boolean,
     diaria: number,
-    modo: ModoMora
+    modo: ModoMora,
+    retroactiva?: boolean
   ) => Promise<void>;
 }
 
@@ -120,6 +122,7 @@ export const LoansView: React.FC<LoansViewProps> = ({
   const [editandoMora, setEditandoMora] = useState(false);
   const [moraDiaria, setMoraDiaria] = useState<number | null>(null);
   const [moraModo, setMoraModo] = useState<ModoMora>('por_cuota');
+  const [moraRetroactiva, setMoraRetroactiva] = useState(false);
   const [errorMora, setErrorMora] = useState('');
 
   const [cuotaPagoId, setCuotaPagoId] = useState<string | null>(null);
@@ -291,6 +294,7 @@ export const LoansView: React.FC<LoansViewProps> = ({
   const abrirEdicionMora = (prestamo: Prestamo) => {
     setMoraDiaria(prestamo.mora_activa ? Number(prestamo.mora_diaria) || null : null);
     setMoraModo(modoMoraSeguro(prestamo.mora_modo));
+    setMoraRetroactiva(Boolean(prestamo.mora_retroactiva));
     setErrorMora('');
     setEditandoMora(true);
   };
@@ -305,7 +309,13 @@ export const LoansView: React.FC<LoansViewProps> = ({
     }
 
     const ok = await ejecutar(() =>
-      onConfigurarMora(prestamo.id, activa, redondearDinero(moraDiaria ?? 0), moraModo)
+      onConfigurarMora(
+        prestamo.id,
+        activa,
+        redondearDinero(moraDiaria ?? 0),
+        moraModo,
+        moraRetroactiva
+      )
     );
     if (ok) {
       setEditandoMora(false);
@@ -976,9 +986,58 @@ export const LoansView: React.FC<LoansViewProps> = ({
                           </p>
                         </div>
 
+                        <div>
+                          <label
+                            htmlFor="mora-desde-cuando"
+                            className="block text-[11px] font-semibold text-slate-700 mb-1"
+                          >
+                            Desde cuándo se cobra
+                          </label>
+                          <select
+                            id="mora-desde-cuando"
+                            value={moraRetroactiva ? 'retroactiva' : 'desde_hoy'}
+                            onChange={(e) => setMoraRetroactiva(e.target.value === 'retroactiva')}
+                            className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-emerald-500"
+                          >
+                            <option value="desde_hoy">Desde hoy — no cobra lo ya atrasado</option>
+                            <option value="retroactiva">
+                              Aplicarla a lo ya atrasado — cobra desde el vencimiento
+                            </option>
+                          </select>
+                        </div>
+
+                        {/* La cifra por adelantado convierte la decisión en
+                            una elección, no en una sorpresa. */}
+                        {(() => {
+                          const previo = simularMora(
+                            selectedPrestamo,
+                            moraDiaria ?? 0,
+                            moraModo,
+                            moraRetroactiva,
+                            hoyISO
+                          );
+                          if (!moraDiaria) return null;
+
+                          return previo.total > 0 ? (
+                            <div className="bg-amber-100 border border-amber-300 rounded-xl p-2.5 text-xs">
+                              <div className="flex justify-between font-bold text-amber-900">
+                                <span>Se le cobrarían de entrada:</span>
+                                <span>{formatCurrency(previo.total)}</span>
+                              </div>
+                              <p className="text-[11px] text-amber-900/80 mt-0.5 leading-snug">
+                                Por {previo.cuotas} cuota{previo.cuotas === 1 ? '' : 's'} ya
+                                vencida{previo.cuotas === 1 ? '' : 's'}.
+                              </p>
+                            </div>
+                          ) : (
+                            <p className="text-[11px] text-slate-500 leading-snug">
+                              Empieza en cero: la mora corre a partir de hoy.
+                            </p>
+                          );
+                        })()}
+
                         <p className="text-[11px] text-slate-500 leading-snug">
-                          La mora empieza a correr hoy, nunca hacia atrás. Al quitarla se perdona
-                          lo que quede pendiente; lo ya cobrado no se toca.
+                          Al quitarla se perdona lo que quede pendiente; lo ya cobrado no se toca.
                         </p>
 
                         <div className="flex items-center justify-end gap-2 flex-wrap">
@@ -1016,7 +1075,9 @@ export const LoansView: React.FC<LoansViewProps> = ({
                           {MODOS_MORA[modoMoraSeguro(selectedPrestamo.mora_modo)].detalle}
                         </div>
                         <div className="text-[11px] text-slate-500">
-                          Corriendo desde el {formatDate(selectedPrestamo.mora_desde ?? '')}
+                          {selectedPrestamo.mora_retroactiva
+                            ? 'Aplicada desde el vencimiento de cada cuota'
+                            : `Corriendo desde el ${formatDate(selectedPrestamo.mora_desde ?? '')}`}
                         </div>
                         <div className="flex justify-between font-bold text-amber-900 pt-1 border-t border-amber-200">
                           <span>Mora pendiente:</span>

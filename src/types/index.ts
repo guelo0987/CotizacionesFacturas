@@ -175,12 +175,18 @@ export interface Prestamo {
   /** Cuánto se cobra por cada día de atraso. */
   mora_diaria: number;
   mora_modo: ModoMora;
-  /**
-   * Día desde el que corre la mora. Nunca es retroactiva: al habilitarla se
-   * fija en la fecha del momento, para que activarla en un préstamo con
-   * meses de atraso no haga aparecer una deuda de golpe.
-   */
+  /** Día en que se habilitó la mora. */
   mora_desde: string | null;
+  /**
+   * Si la mora alcanza a los atrasos anteriores a habilitarla.
+   *
+   * `false` (lo normal) la hace correr desde el día en que se activó, para
+   * que encenderla en un préstamo con meses de atraso no haga aparecer de
+   * golpe una deuda que el cliente nunca supo que tenía. `true` la cobra
+   * desde el vencimiento de cada cuota, para el cliente al que sí se le
+   * reclama lo ya atrasado.
+   */
+  mora_retroactiva: boolean;
   estado: EstadoPrestamo;
   created_at: string;
   cuotas?: Cuota[];

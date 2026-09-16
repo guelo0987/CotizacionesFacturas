@@ -391,7 +391,8 @@ export function modoMoraSeguro(valor: string | null | undefined): ModoMora {
 export function diasDeMora(
   fechaVencimiento: string,
   moraDesde: string | null | undefined,
-  hoy: string
+  hoy: string,
+  retroactiva = false
 ): number {
   if (!fechaVencimiento) return 0;
 
@@ -407,7 +408,9 @@ export function diasDeMora(
   const ahora = dia(hoy);
   if (!Number.isFinite(vence) || !Number.isFinite(ahora)) return 0;
 
-  const arranque = Math.max(vence, Number.isFinite(desde) ? desde : vence);
+  // Retroactiva: cuenta desde el vencimiento de la cuota, alcanzando los
+  // atrasos anteriores a habilitarla.
+  const arranque = retroactiva ? vence : Math.max(vence, Number.isFinite(desde) ? desde : vence);
   return Math.max(0, Math.round((ahora - arranque) / 86_400_000));
 }
 
@@ -446,6 +449,45 @@ export function calcularMoraCuota(
     return { dias: 0, monto: redondearDinero(cuota.mora_acumulada || 0) };
   }
 
-  const dias = diasDeMora(cuota.fecha_vencimiento, prestamo.mora_desde, hoy);
+  const dias = diasDeMora(
+    cuota.fecha_vencimiento,
+    prestamo.mora_desde,
+    hoy,
+    prestamo.mora_retroactiva
+  );
   return { dias, monto: redondearDinero(Math.max(0, prestamo.mora_diaria || 0) * dias) };
+}
+
+/**
+ * Cuánto cobraría la mora si se habilitara ahora con estos ajustes.
+ *
+ * Sirve para que el cobrador vea la cifra ANTES de activarla: con la
+ * opción retroactiva puede ser una cantidad considerable, y verla
+ * convierte la decisión en una elección en vez de una sorpresa.
+ */
+export function simularMora(
+  prestamo: Prestamo,
+  diaria: number,
+  modo: ModoMora,
+  retroactiva: boolean,
+  hoy: string
+): { total: number; cuotas: number } {
+  const vencidas = (prestamo.cuotas ?? [])
+    .filter((c) => c.estado !== 'pagada' && c.fecha_vencimiento.split('T')[0] < hoy)
+    .sort(
+      (a, b) =>
+        a.fecha_vencimiento.localeCompare(b.fecha_vencimiento) || a.numero - b.numero
+    );
+
+  // Con una sola mora para todo el préstamo, sólo corre la más antigua.
+  const aplicables = modo === 'por_prestamo' ? vencidas.slice(0, 1) : vencidas;
+  const desde = prestamo.mora_desde ?? hoy;
+
+  const total = aplicables.reduce(
+    (suma, c) =>
+      suma + Math.max(0, diaria) * diasDeMora(c.fecha_vencimiento, desde, hoy, retroactiva),
+    0
+  );
+
+  return { total: redondearDinero(total), cuotas: aplicables.length };
 }

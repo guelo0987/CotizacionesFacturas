@@ -476,9 +476,16 @@ export function App() {
     prestamoId: string,
     activa: boolean,
     diaria: number,
-    modo: ModoMora
+    modo: ModoMora,
+    retroactiva = false
   ) => {
-    const actualizado = await supabaseDataService.configurarMora(prestamoId, activa, diaria, modo);
+    const actualizado = await supabaseDataService.configurarMora(
+      prestamoId,
+      activa,
+      diaria,
+      modo,
+      retroactiva
+    );
     setState((prev) => ({
       ...prev,
       prestamos: prev.prestamos.map((p) => (p.id === actualizado.id ? actualizado : p)),

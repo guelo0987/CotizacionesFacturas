@@ -11,6 +11,7 @@ import {
   calcularMoraCuota,
   diasDeMora,
   moraPendiente,
+  simularMora,
 } from './calculos';
 import type { Cuota, Prestamo } from '../types';
 import { redondearDinero } from './validacion';
@@ -397,6 +398,12 @@ describe('mora por atraso', () => {
     it('sin fecha de habilitación cuenta desde el vencimiento', () => {
       expect(diasDeMora(VIERNES, null, '2026-09-14')).toBe(3);
     });
+
+    it('retroactiva: alcanza los atrasos anteriores a habilitarla', () => {
+      // Habilitada el sábado, pero cobrando desde que venció el viernes
+      expect(diasDeMora(VIERNES, SABADO, SABADO, true)).toBe(1);
+      expect(diasDeMora(VIERNES, '2026-09-20', '2026-09-21', true)).toBe(10);
+    });
   });
 
   describe('calcularMoraCuota', () => {
@@ -455,5 +462,59 @@ describe('mora por atraso', () => {
     it('nunca queda negativa', () => {
       expect(moraPendiente({ ...base, mora_acumulada: 100, mora_pagada: 300 } as Cuota)).toBe(0);
     });
+  });
+});
+
+describe('simularMora', () => {
+  const HOY = '2026-09-20';
+
+  const cuota = (numero: number, vence: string, estado: Cuota['estado'] = 'atrasada'): Cuota =>
+    ({
+      id: `q${numero}`, prestamo_id: 'p1', numero, fecha_vencimiento: vence,
+      monto: 1000, mora_acumulada: 0, mora_pagada: 0, interes: 0, capital: 1000,
+      saldo_capital: 0, monto_pagado: 0, estado,
+    }) as Cuota;
+
+  const prestamo = (): Prestamo =>
+    ({
+      id: 'p1', cliente_id: 'c1', monto_prestado: 4000, tasa_interes: 0,
+      modalidad_interes: 'fijo_total', interes_total: 0, total_a_pagar: 4000,
+      num_cuotas: 4, frecuencia: 'semanal', fecha_inicio: '2026-08-30',
+      mora_activa: false, mora_diaria: 0, mora_modo: 'por_cuota',
+      mora_desde: null, mora_retroactiva: false, estado: 'atrasado', created_at: '',
+      cuotas: [
+        cuota(1, '2026-09-13'), // 7 días vencida
+        cuota(2, '2026-09-18'), // 2 días vencida
+        cuota(3, '2026-09-25', 'pendiente'),
+      ],
+    }) as Prestamo;
+
+  it('desde hoy no cobra nada de entrada', () => {
+    expect(simularMora(prestamo(), 100, 'por_cuota', false, HOY)).toEqual({
+      total: 0,
+      cuotas: 2,
+    });
+  });
+
+  it('retroactiva cobra los días ya vencidos de cada cuota', () => {
+    // 7 días × 100 + 2 días × 100 = 900
+    expect(simularMora(prestamo(), 100, 'por_cuota', true, HOY)).toEqual({
+      total: 900,
+      cuotas: 2,
+    });
+  });
+
+  it('retroactiva en modo por_prestamo sólo cobra la más antigua', () => {
+    // sólo la cuota 1: 7 días × 100 = 700
+    expect(simularMora(prestamo(), 100, 'por_prestamo', true, HOY)).toEqual({
+      total: 700,
+      cuotas: 1,
+    });
+  });
+
+  it('ignora las cuotas ya pagadas y las que no han vencido', () => {
+    const p = prestamo();
+    p.cuotas![0].estado = 'pagada';
+    expect(simularMora(p, 100, 'por_cuota', true, HOY)).toEqual({ total: 200, cuotas: 1 });
   });
 });

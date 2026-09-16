@@ -475,7 +475,8 @@ export const supabaseDataService = {
     prestamoId: string,
     activa: boolean,
     diaria: number,
-    modo: ModoMora
+    modo: ModoMora,
+    retroactiva = false
   ): Promise<Prestamo> {
     const supabase = requireSupabaseClient();
     const { data, error } = await supabase.rpc('configurar_mora', {
@@ -483,6 +484,7 @@ export const supabaseDataService = {
       p_activa: activa,
       p_diaria: diaria,
       p_modo: modo,
+      p_retroactiva: retroactiva,
     });
 
     if (error) throw traducir(error, 'configurar la mora');

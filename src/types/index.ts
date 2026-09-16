@@ -31,6 +31,16 @@ export type FrecuenciaPrestamo =
  */
 export type ModalidadInteres = 'por_periodo' | 'amortizado' | 'fijo_total';
 
+/**
+ * Cómo se acumula la mora cuando hay varias cuotas vencidas a la vez.
+ *
+ * - `por_cuota`: cada cuota atrasada genera su propia mora diaria. Con dos
+ *   cuotas vencidas y RD$100 al día, se acumulan RD$200 diarios.
+ * - `por_prestamo`: una sola mora diaria mientras haya algo atrasado, que
+ *   corre sobre la cuota vencida más antigua.
+ */
+export type ModoMora = 'por_cuota' | 'por_prestamo';
+
 export type EstadoPrestamo = 'activo' | 'saldado' | 'atrasado';
 export type EstadoCuota = 'pendiente' | 'parcial' | 'pagada' | 'atrasada';
 
@@ -123,6 +133,8 @@ export interface Pago {
   monto: number;
   fecha: string;
   metodo: MetodoPago;
+  /** Parte del pago que se aplicó a la mora; el resto va a la cuota. */
+  monto_mora: number;
   referencia?: string | null;
   created_at: string;
 }
@@ -133,6 +145,10 @@ export interface Cuota {
   numero: number;
   fecha_vencimiento: string;
   monto: number;
+  /** Mora acumulada por el atraso. Deja de crecer al saldar la cuota. */
+  mora_acumulada: number;
+  /** Parte de esa mora que el cliente ya pagó. */
+  mora_pagada: number;
   /** Parte de la cuota que es interés. */
   interes: number;
   /** Parte de la cuota que abona al capital. */
@@ -154,6 +170,17 @@ export interface Prestamo {
   num_cuotas: number;
   frecuencia: FrecuenciaPrestamo;
   fecha_inicio: string;
+  /** Mora por atraso: se habilita préstamo por préstamo, cuando hace falta. */
+  mora_activa: boolean;
+  /** Cuánto se cobra por cada día de atraso. */
+  mora_diaria: number;
+  mora_modo: ModoMora;
+  /**
+   * Día desde el que corre la mora. Nunca es retroactiva: al habilitarla se
+   * fija en la fecha del momento, para que activarla en un préstamo con
+   * meses de atraso no haga aparecer una deuda de golpe.
+   */
+  mora_desde: string | null;
   estado: EstadoPrestamo;
   created_at: string;
   cuotas?: Cuota[];

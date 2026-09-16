@@ -1,7 +1,14 @@
 import React from 'react';
 import type { BusinessSettings, Cliente, Prestamo } from '../../types';
 import { formatCurrency, formatDate, formatDocumento, formatTelefono } from '../../utils/sanitizer';
-import { FRECUENCIAS, frecuenciaSegura } from '../../utils/calculos';
+import {
+  FRECUENCIAS,
+  MODOS_MORA,
+  frecuenciaSegura,
+  modoMoraSeguro,
+  moraPendiente,
+  moraPendientePrestamo,
+} from '../../utils/calculos';
 import {
   descripcionInteres,
   referenciaPrestamo,
@@ -123,6 +130,24 @@ export const ComprobantePrestamoA4: React.FC<Props> = ({ id, prestamo, cliente, 
         </div>
       </div>
 
+      {prestamo.mora_activa ? (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs space-y-1">
+          <div className="font-bold uppercase tracking-wider text-amber-900 text-[10px]">
+            Mora por atraso
+          </div>
+          <div className="text-slate-700">
+            {formatCurrency(prestamo.mora_diaria)} por cada día de atraso ·{' '}
+            {MODOS_MORA[modoMoraSeguro(prestamo.mora_modo)].detalle}.
+          </div>
+          {moraPendientePrestamo(prestamo) > 0 ? (
+            <div className="flex justify-between font-bold text-amber-900 pt-1 border-t border-amber-300">
+              <span>Mora pendiente a la fecha:</span>
+              <span>{formatCurrency(moraPendientePrestamo(prestamo))}</span>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       {/* Calendario */}
       <div>
         <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">
@@ -137,6 +162,7 @@ export const ComprobantePrestamoA4: React.FC<Props> = ({ id, prestamo, cliente, 
               <th className="p-2 text-right">Interés</th>
               <th className="p-2 text-right">Capital</th>
               <th className="p-2 text-right">Saldo</th>
+              {prestamo.mora_activa ? <th className="p-2 text-right">Mora</th> : null}
               <th className="p-2 text-right rounded-r">Estado</th>
             </tr>
           </thead>
@@ -153,6 +179,11 @@ export const ComprobantePrestamoA4: React.FC<Props> = ({ id, prestamo, cliente, 
                 <td className="p-2 text-right text-slate-600">
                   {formatCurrency(cuota.saldo_capital)}
                 </td>
+                {prestamo.mora_activa ? (
+                  <td className="p-2 text-right font-bold text-amber-800">
+                    {moraPendiente(cuota) > 0 ? formatCurrency(moraPendiente(cuota)) : '—'}
+                  </td>
+                ) : null}
                 <td className="p-2 text-right uppercase text-[10px] font-bold text-slate-700">
                   {cuota.estado}
                 </td>
@@ -241,6 +272,18 @@ export const ComprobantePrestamoTermico: React.FC<Props & { formato: FormatoImpr
           fuerte
         />
         <div className="pt-1 break-words">{descripcionInteres(prestamo)}.</div>
+        {prestamo.mora_activa ? (
+          <div className="pt-1 break-words font-bold">
+            Mora: {monto(prestamo.mora_diaria)} por cada día de atraso.
+          </div>
+        ) : null}
+        {moraPendientePrestamo(prestamo) > 0 ? (
+          <FilaTermica
+            etiqueta="Mora pendiente:"
+            valor={monto(moraPendientePrestamo(prestamo))}
+            fuerte
+          />
+        ) : null}
       </div>
 
       <Separador />
@@ -255,6 +298,7 @@ export const ComprobantePrestamoTermico: React.FC<Props & { formato: FormatoImpr
             </span>
             <span className="tabular-nums whitespace-nowrap">
               {monto(cuota.monto)}
+              {moraPendiente(cuota) > 0 ? `+${monto(moraPendiente(cuota))}` : ''}
               {cuota.estado === 'pagada' ? ' OK' : ''}
             </span>
           </div>

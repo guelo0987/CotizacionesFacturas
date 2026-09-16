@@ -5,6 +5,7 @@ import type {
   FrecuenciaPrestamo,
   MetodoPago,
   ModalidadInteres,
+  ModoMora,
   Prestamo,
 } from '../types';
 import type { SolicitudApertura } from '../App';
@@ -14,7 +15,13 @@ import {
   FRECUENCIAS_VALIDAS,
   MODALIDADES,
   MODALIDADES_VALIDAS,
+  MODOS_MORA,
+  MODOS_MORA_VALIDOS,
+  calcularMoraCuota,
   calcularPrestamo,
+  moraPendiente,
+  moraPendientePrestamo,
+  modoMoraSeguro,
   frecuenciaSegura,
   modalidadSegura,
   tasaAnualEquivalente,
@@ -42,6 +49,7 @@ import {
   Edit2,
   Info,
   Landmark,
+  AlertTriangle,
   Plus,
   Printer,
   Receipt,
@@ -59,9 +67,16 @@ interface LoansViewProps {
     cuotaId: string,
     monto: number,
     metodo: MetodoPago,
-    referencia?: string
+    referencia?: string,
+    montoMora?: number
   ) => Promise<void>;
   onDeletePrestamo: (prestamo: Prestamo) => Promise<void>;
+  onConfigurarMora: (
+    prestamoId: string,
+    activa: boolean,
+    diaria: number,
+    modo: ModoMora
+  ) => Promise<void>;
 }
 
 interface FormularioPrestamo {
@@ -90,6 +105,7 @@ export const LoansView: React.FC<LoansViewProps> = ({
   onGuardarPrestamo,
   onRegistrarPagoCuota,
   onDeletePrestamo,
+  onConfigurarMora,
 }) => {
   const [search, setSearch] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -100,8 +116,15 @@ export const LoansView: React.FC<LoansViewProps> = ({
 
   const [documentoPdf, setDocumentoPdf] = useState<DocumentoPrestamo | null>(null);
 
+  // Configuración de la mora del préstamo abierto
+  const [editandoMora, setEditandoMora] = useState(false);
+  const [moraDiaria, setMoraDiaria] = useState<number | null>(null);
+  const [moraModo, setMoraModo] = useState<ModoMora>('por_cuota');
+  const [errorMora, setErrorMora] = useState('');
+
   const [cuotaPagoId, setCuotaPagoId] = useState<string | null>(null);
   const [pagoMonto, setPagoMonto] = useState<number | null>(null);
+  const [pagoMora, setPagoMora] = useState<number | null>(null);
   const [pagoMetodo, setPagoMetodo] = useState<MetodoPago>('efectivo');
   const [pagoRef, setPagoRef] = useState('');
   const [errorPago, setErrorPago] = useState('');
@@ -146,6 +169,7 @@ export const LoansView: React.FC<LoansViewProps> = ({
   );
 
   const frecuenciaActual = FRECUENCIAS[frecuenciaSegura(formData.frecuencia)];
+  const hoyISO = new Date().toISOString().split('T')[0];
 
   const abrirCreacion = React.useCallback(() => {
     setEditandoId(null);
@@ -219,6 +243,7 @@ export const LoansView: React.FC<LoansViewProps> = ({
     const restante = redondearDinero(cuota.monto - (cuota.monto_pagado || 0));
     setCuotaPagoId(cuota.id);
     setPagoMonto(restante);
+    setPagoMora(moraPendiente(cuota) || null);
     setPagoMetodo('efectivo');
     setPagoRef('');
     setErrorPago('');
@@ -229,31 +254,63 @@ export const LoansView: React.FC<LoansViewProps> = ({
     if (!cuotaEnPago) return;
 
     const restante = redondearDinero(cuotaEnPago.monto - (cuotaEnPago.monto_pagado || 0));
-    const monto = pagoMonto;
+    const moraPend = moraPendiente(cuotaEnPago);
+    const aCuota = redondearDinero(pagoMonto ?? 0);
+    const aMora = redondearDinero(pagoMora ?? 0);
+    const total = redondearDinero(aCuota + aMora);
 
-    if (monto === null) {
-      setErrorPago('Escribe un monto válido.');
-      return;
-    }
-    if (monto <= 0) {
+    if (total <= 0) {
       setErrorPago('El abono debe ser mayor que cero.');
       return;
     }
-    if (redondearDinero(monto) > restante) {
-      setErrorPago(`El abono supera lo que resta de la cuota (${formatCurrency(restante)}).`);
+    if (aMora > moraPend) {
+      setErrorPago(`La parte de mora supera la mora pendiente (${formatCurrency(moraPend)}).`);
+      return;
+    }
+    if (aCuota > restante) {
+      setErrorPago(`El abono a la cuota supera lo que resta (${formatCurrency(restante)}).`);
       return;
     }
 
     const ok = await ejecutar(() =>
       onRegistrarPagoCuota(
         cuotaEnPago.id,
-        redondearDinero(monto),
+        total,
         pagoMetodo,
-        limpiarTexto(pagoRef, 120) || undefined
+        limpiarTexto(pagoRef, 120) || undefined,
+        aMora
       )
     );
 
     if (ok) setCuotaPagoId(null);
+  };
+
+  // ---------------------------------------------------------------
+  // Mora
+  // ---------------------------------------------------------------
+  const abrirEdicionMora = (prestamo: Prestamo) => {
+    setMoraDiaria(prestamo.mora_activa ? Number(prestamo.mora_diaria) || null : null);
+    setMoraModo(modoMoraSeguro(prestamo.mora_modo));
+    setErrorMora('');
+    setEditandoMora(true);
+  };
+
+  const guardarMora = async (prestamo: Prestamo, activa: boolean) => {
+    if (activa) {
+      const fallo = validarMonto(moraDiaria, 'La mora diaria', { min: 1 });
+      if (!fallo.valido) {
+        setErrorMora(fallo.mensaje ?? 'Dato inválido.');
+        return;
+      }
+    }
+
+    const ok = await ejecutar(() =>
+      onConfigurarMora(prestamo.id, activa, redondearDinero(moraDiaria ?? 0), moraModo)
+    );
+    if (ok) {
+      setEditandoMora(false);
+      setErrorMora('');
+    }
   };
 
   // ---------------------------------------------------------------
@@ -407,6 +464,18 @@ export const LoansView: React.FC<LoansViewProps> = ({
                     </span>
                   </div>
                 </div>
+
+                {moraPendientePrestamo(prestamo) > 0 ? (
+                  <div className="flex items-center justify-between gap-2 bg-amber-50 border border-amber-200 rounded-xl px-2.5 py-1.5 text-xs">
+                    <span className="font-semibold text-amber-900 flex items-center gap-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                      Mora acumulada
+                    </span>
+                    <span className="font-black text-amber-900">
+                      {formatCurrency(moraPendientePrestamo(prestamo))}
+                    </span>
+                  </div>
+                ) : null}
 
                 <div className="space-y-1">
                   <div className="flex justify-between text-xs font-semibold">
@@ -825,6 +894,145 @@ export const LoansView: React.FC<LoansViewProps> = ({
                 </div>
               </div>
 
+              {/* Mora por atraso. Va aquí y no en el formulario del
+                  préstamo porque se habilita cuando el cliente ya se
+                  atrasó, y para entonces el préstamo suele tener pagos,
+                  que es justo lo que impide editarlo. */}
+              {(() => {
+                const moraPend = moraPendientePrestamo(selectedPrestamo);
+                const activa = selectedPrestamo.mora_activa;
+
+                return (
+                  <div
+                    className={`p-3 rounded-xl border space-y-2 ${
+                      moraPend > 0
+                        ? 'bg-amber-50 border-amber-200'
+                        : 'bg-slate-50 border-slate-200'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+                        <AlertTriangle
+                          className={`w-3.5 h-3.5 ${activa ? 'text-amber-600' : 'text-slate-400'}`}
+                        />
+                        Mora por atraso
+                      </span>
+                      {!editandoMora ? (
+                        <button
+                          onClick={() => abrirEdicionMora(selectedPrestamo)}
+                          className="text-[11px] font-semibold text-emerald-700 hover:underline"
+                        >
+                          {activa ? 'Cambiar' : 'Habilitar'}
+                        </button>
+                      ) : null}
+                    </div>
+
+                    {editandoMora ? (
+                      <div className="space-y-2">
+                        {errorMora ? (
+                          <div role="alert" className="text-xs text-red-700 font-semibold">
+                            {errorMora}
+                          </div>
+                        ) : null}
+
+                        <div>
+                          <label
+                            htmlFor="mora-diaria"
+                            className="block text-[11px] font-semibold text-slate-700 mb-1"
+                          >
+                            Cuánto se cobra por cada día de atraso
+                          </label>
+                          <CampoMoneda
+                            id="mora-diaria"
+                            value={moraDiaria}
+                            onChange={(v) => {
+                              setMoraDiaria(v);
+                              setErrorMora('');
+                            }}
+                          />
+                        </div>
+
+                        <div>
+                          <label
+                            htmlFor="mora-modo"
+                            className="block text-[11px] font-semibold text-slate-700 mb-1"
+                          >
+                            Si hay varias cuotas atrasadas
+                          </label>
+                          <select
+                            id="mora-modo"
+                            value={moraModo}
+                            onChange={(e) => setMoraModo(e.target.value as ModoMora)}
+                            className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-emerald-500"
+                          >
+                            {MODOS_MORA_VALIDOS.map((id) => (
+                              <option key={id} value={id}>
+                                {MODOS_MORA[id].etiqueta}
+                              </option>
+                            ))}
+                          </select>
+                          <p className="text-[11px] text-slate-500 mt-1">
+                            {MODOS_MORA[moraModo].detalle}.
+                          </p>
+                        </div>
+
+                        <p className="text-[11px] text-slate-500 leading-snug">
+                          La mora empieza a correr hoy, nunca hacia atrás. Al quitarla se perdona
+                          lo que quede pendiente; lo ya cobrado no se toca.
+                        </p>
+
+                        <div className="flex items-center justify-end gap-2 flex-wrap">
+                          <button
+                            onClick={() => {
+                              setEditandoMora(false);
+                              setErrorMora('');
+                            }}
+                            className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white text-slate-600 border border-slate-200"
+                          >
+                            Cancelar
+                          </button>
+                          {activa ? (
+                            <button
+                              onClick={() => void guardarMora(selectedPrestamo, false)}
+                              disabled={ejecutando}
+                              className="px-3 py-1.5 rounded-lg text-xs font-semibold text-red-700 bg-red-50 border border-red-200 hover:bg-red-100 disabled:opacity-50"
+                            >
+                              Quitar mora
+                            </button>
+                          ) : null}
+                          <button
+                            onClick={() => void guardarMora(selectedPrestamo, true)}
+                            disabled={ejecutando}
+                            className="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white"
+                          >
+                            {ejecutando ? 'Guardando…' : activa ? 'Guardar' : 'Habilitar mora'}
+                          </button>
+                        </div>
+                      </div>
+                    ) : activa ? (
+                      <div className="text-xs text-slate-700 space-y-1">
+                        <div>
+                          <strong>{formatCurrency(selectedPrestamo.mora_diaria)}</strong> por día ·{' '}
+                          {MODOS_MORA[modoMoraSeguro(selectedPrestamo.mora_modo)].detalle}
+                        </div>
+                        <div className="text-[11px] text-slate-500">
+                          Corriendo desde el {formatDate(selectedPrestamo.mora_desde ?? '')}
+                        </div>
+                        <div className="flex justify-between font-bold text-amber-900 pt-1 border-t border-amber-200">
+                          <span>Mora pendiente:</span>
+                          <span>{formatCurrency(moraPend)}</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-500">
+                        Sin mora. Habilítala si este cliente se atrasa y quieres cobrarle por cada
+                        día que pase.
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
+
               <h4 className="text-sm font-bold text-slate-700 uppercase tracking-wider">
                 Calendario de cuotas ({selectedPrestamo.cuotas?.length ?? 0})
               </h4>
@@ -840,6 +1048,9 @@ export const LoansView: React.FC<LoansViewProps> = ({
                     (selectedPrestamo.pagos ?? [])
                       .filter((pago) => pago.cuota_id === cuota.id)
                       .sort((a, b) => (a.fecha < b.fecha ? 1 : -1))[0] ?? null;
+
+                  const moraCuota = moraPendiente(cuota);
+                  const { dias: diasMora } = calcularMoraCuota(selectedPrestamo, cuota, hoyISO);
                   const recordatorio = generateWhatsappLoanCuotaUrl(
                     selectedPrestamo,
                     cuota,
@@ -900,12 +1111,25 @@ export const LoansView: React.FC<LoansViewProps> = ({
                             {formatCurrency(restante)}
                           </p>
                         ) : null}
+
+                        {moraCuota > 0 ? (
+                          <p className="text-[11px] font-bold text-amber-800 flex items-center gap-1">
+                            <AlertTriangle className="w-3 h-3" />
+                            Mora {formatCurrency(moraCuota)}
+                            {diasMora > 0 ? ` · ${diasMora} día${diasMora === 1 ? '' : 's'}` : ''}
+                          </p>
+                        ) : null}
                       </div>
 
                       <div className="text-right space-y-1 shrink-0">
                         <span className="font-black text-slate-800 text-sm block">
                           {formatCurrency(cuota.monto)}
                         </span>
+                        {moraCuota > 0 ? (
+                          <span className="text-[11px] font-bold text-amber-800 block">
+                            + mora = {formatCurrency(redondearDinero(restante + moraCuota))}
+                          </span>
+                        ) : null}
 
                         <div className="flex items-center justify-end gap-1.5">
                           {cuota.estado !== 'pagada' ? (
@@ -1056,25 +1280,81 @@ export const LoansView: React.FC<LoansViewProps> = ({
                     )}
                   </span>
                 </div>
+                {moraPendiente(cuotaEnPago) > 0 ? (
+                  <div className="flex justify-between text-amber-900 font-bold bg-amber-100 p-1.5 rounded mt-1">
+                    <span>Mora acumulada:</span>
+                    <span>{formatCurrency(moraPendiente(cuotaEnPago))}</span>
+                  </div>
+                ) : null}
               </div>
 
-              <div>
-                <label htmlFor="cuota-monto" className="block text-sm font-semibold text-slate-700 mb-1">
-                  Monto a abonar *
-                </label>
-                <CampoMoneda
-                  id="cuota-monto"
-                  value={pagoMonto}
-                  onChange={(monto) => {
-                    setPagoMonto(monto);
-                    setErrorPago('');
-                  }}
-                  className="font-black"
-                />
-                <p className="text-xs text-slate-500 mt-1">
-                  Puedes abonar menos que la cuota completa.
-                </p>
-              </div>
+              {/* Con mora pendiente el cobro se reparte a mano: el cobrador
+                  decide cuánto del dinero que recibe va a cada cosa. Sin
+                  mora, el formulario de siempre. */}
+              {moraPendiente(cuotaEnPago) > 0 ? (
+                <div className="space-y-3">
+                  <div>
+                    <label
+                      htmlFor="cuota-mora"
+                      className="block text-sm font-semibold text-slate-700 mb-1"
+                    >
+                      A la mora
+                    </label>
+                    <CampoMoneda
+                      id="cuota-mora"
+                      value={pagoMora}
+                      onChange={(monto) => {
+                        setPagoMora(monto);
+                        setErrorPago('');
+                      }}
+                      className="!text-amber-800 font-black"
+                    />
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="cuota-monto"
+                      className="block text-sm font-semibold text-slate-700 mb-1"
+                    >
+                      A la cuota
+                    </label>
+                    <CampoMoneda
+                      id="cuota-monto"
+                      value={pagoMonto}
+                      onChange={(monto) => {
+                        setPagoMonto(monto);
+                        setErrorPago('');
+                      }}
+                      className="font-black"
+                    />
+                  </div>
+
+                  <div className="flex justify-between items-center bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 text-sm">
+                    <span className="font-semibold text-emerald-900">Total que recibes:</span>
+                    <span className="font-black text-emerald-700">
+                      {formatCurrency(redondearDinero((pagoMora ?? 0) + (pagoMonto ?? 0)))}
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <label htmlFor="cuota-monto" className="block text-sm font-semibold text-slate-700 mb-1">
+                    Monto a abonar *
+                  </label>
+                  <CampoMoneda
+                    id="cuota-monto"
+                    value={pagoMonto}
+                    onChange={(monto) => {
+                      setPagoMonto(monto);
+                      setErrorPago('');
+                    }}
+                    className="font-black"
+                  />
+                  <p className="text-xs text-slate-500 mt-1">
+                    Puedes abonar menos que la cuota completa.
+                  </p>
+                </div>
+              )}
 
               <div>
                 <label htmlFor="cuota-metodo" className="block text-sm font-semibold text-slate-700 mb-1">

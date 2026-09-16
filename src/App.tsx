@@ -8,6 +8,7 @@ import type {
   Factura,
   LineaDocumento,
   MetodoPago,
+  ModoMora,
   Prestamo,
   Servicio,
   TabType,
@@ -471,17 +472,37 @@ export function App() {
     exito(datos.id ? 'Préstamo actualizado.' : 'Préstamo creado con su calendario de cuotas.');
   };
 
+  const handleConfigurarMora = async (
+    prestamoId: string,
+    activa: boolean,
+    diaria: number,
+    modo: ModoMora
+  ) => {
+    const actualizado = await supabaseDataService.configurarMora(prestamoId, activa, diaria, modo);
+    setState((prev) => ({
+      ...prev,
+      prestamos: prev.prestamos.map((p) => (p.id === actualizado.id ? actualizado : p)),
+    }));
+    exito(
+      activa
+        ? `Mora habilitada: ${formatCurrency(diaria)} por cada día de atraso.`
+        : 'Mora desactivada. Se perdonó lo que quedaba pendiente.'
+    );
+  };
+
   const handleRegistrarPagoCuota = async (
     cuotaId: string,
     monto: number,
     metodo: MetodoPago,
-    referencia?: string
+    referencia?: string,
+    montoMora = 0
   ) => {
     const actualizado = await supabaseDataService.registrarPagoCuota(
       cuotaId,
       monto,
       metodo,
-      referencia
+      referencia,
+      montoMora
     );
 
     setState((prev) => ({
@@ -641,6 +662,7 @@ export function App() {
             solicitud={solicitud}
             onGuardarPrestamo={handleGuardarPrestamo}
             onRegistrarPagoCuota={handleRegistrarPagoCuota}
+            onConfigurarMora={handleConfigurarMora}
             onDeletePrestamo={handleDeletePrestamo}
           />
         ) : null}

@@ -7,6 +7,7 @@ import type {
   Factura,
   LineaDocumento,
   MetodoPago,
+  ModoMora,
   Pago,
   Prestamo,
   Servicio,
@@ -463,12 +464,42 @@ export const supabaseDataService = {
     if (error) throw traducir(error, 'eliminar el préstamo');
   },
 
-  /** Admite abonos parciales: el monto no tiene por qué ser la cuota completa. */
+  /**
+   * Habilita, ajusta o quita la mora de un préstamo.
+   *
+   * Va por su propia vía y no por `guardarPrestamo` porque la mora se
+   * habilita cuando el cliente ya se atrasó, y para entonces el préstamo
+   * suele tener pagos, que es lo que impide editarlo.
+   */
+  async configurarMora(
+    prestamoId: string,
+    activa: boolean,
+    diaria: number,
+    modo: ModoMora
+  ): Promise<Prestamo> {
+    const supabase = requireSupabaseClient();
+    const { data, error } = await supabase.rpc('configurar_mora', {
+      p_prestamo_id: prestamoId,
+      p_activa: activa,
+      p_diaria: diaria,
+      p_modo: modo,
+    });
+
+    if (error) throw traducir(error, 'configurar la mora');
+    return data as Prestamo;
+  },
+
+  /**
+   * Admite abonos parciales: el monto no tiene por qué ser la cuota
+   * completa. `montoMora` es la parte del total entregado que se aplica a
+   * la mora; el resto va a la cuota.
+   */
   async registrarPagoCuota(
     cuotaId: string,
     monto: number,
     metodo: MetodoPago,
-    referencia?: string
+    referencia?: string,
+    montoMora = 0
   ): Promise<Prestamo> {
     const supabase = requireSupabaseClient();
     const { data, error } = await supabase.rpc('registrar_pago_cuota', {
@@ -476,6 +507,7 @@ export const supabaseDataService = {
       p_monto: monto,
       p_metodo: metodo,
       p_referencia: referencia ?? null,
+      p_monto_mora: montoMora,
     });
 
     if (error) throw traducir(error, 'registrar el abono de la cuota');

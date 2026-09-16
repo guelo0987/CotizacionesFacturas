@@ -1,6 +1,6 @@
 import { redondearDinero } from './validacion';
 import { addDaysToDate, addMonthsToDate } from './sanitizer';
-import type { FrecuenciaPrestamo, ModalidadInteres } from '../types';
+import type { Cuota, FrecuenciaPrestamo, ModalidadInteres, ModoMora, Prestamo } from '../types';
 
 /**
  * Cálculos de dinero.
@@ -352,4 +352,100 @@ export function calcularSaldoFactura(
     saldoPendiente <= 0 ? 'pagada' : montoPagado > 0 ? 'parcial' : 'pendiente';
 
   return { montoPagado, saldoPendiente, estado };
+}
+
+// =====================================================================
+// Mora por atraso
+// =====================================================================
+
+export interface DefinicionModoMora {
+  etiqueta: string;
+  detalle: string;
+}
+
+export const MODOS_MORA: Record<ModoMora, DefinicionModoMora> = {
+  por_cuota: {
+    etiqueta: 'Por cada cuota atrasada',
+    detalle: 'Cada cuota vencida acumula su propia mora diaria',
+  },
+  por_prestamo: {
+    etiqueta: 'Una sola, aunque haya varias',
+    detalle: 'Una mora diaria mientras el préstamo tenga algo atrasado',
+  },
+};
+
+export const MODOS_MORA_VALIDOS = Object.keys(MODOS_MORA) as ModoMora[];
+
+export function modoMoraSeguro(valor: string | null | undefined): ModoMora {
+  return valor === 'por_prestamo' ? 'por_prestamo' : 'por_cuota';
+}
+
+/**
+ * Días de atraso que generan mora en una cuota.
+ *
+ * La mora nunca es retroactiva: cuenta desde el día en que se habilitó
+ * (`mora_desde`) o desde el vencimiento de la cuota, lo que ocurra más
+ * tarde. Así, activarla en un préstamo atrasado hace meses no hace
+ * aparecer de golpe una deuda que el cliente nunca supo que tenía.
+ */
+export function diasDeMora(
+  fechaVencimiento: string,
+  moraDesde: string | null | undefined,
+  hoy: string
+): number {
+  if (!fechaVencimiento) return 0;
+
+  const dia = (iso: string) => {
+    const [a, m, d] = iso.split('T')[0].split('-').map(Number);
+    return Number.isFinite(a) && Number.isFinite(m) && Number.isFinite(d)
+      ? Date.UTC(a, m - 1, d)
+      : Number.NaN;
+  };
+
+  const vence = dia(fechaVencimiento);
+  const desde = moraDesde ? dia(moraDesde) : vence;
+  const ahora = dia(hoy);
+  if (!Number.isFinite(vence) || !Number.isFinite(ahora)) return 0;
+
+  const arranque = Math.max(vence, Number.isFinite(desde) ? desde : vence);
+  return Math.max(0, Math.round((ahora - arranque) / 86_400_000));
+}
+
+/** Mora que aún se le debe a una cuota: lo acumulado menos lo ya cobrado. */
+export function moraPendiente(cuota: Cuota): number {
+  return redondearDinero(Math.max(0, (cuota.mora_acumulada || 0) - (cuota.mora_pagada || 0)));
+}
+
+/** Mora pendiente de todo el préstamo. */
+export function moraPendientePrestamo(prestamo: Prestamo): number {
+  return redondearDinero(
+    (prestamo.cuotas ?? []).reduce((suma, c) => suma + moraPendiente(c), 0)
+  );
+}
+
+/** Mora ya cobrada en todo el préstamo. */
+export function moraCobradaPrestamo(prestamo: Prestamo): number {
+  return redondearDinero(
+    (prestamo.cuotas ?? []).reduce((suma, c) => suma + (c.mora_pagada || 0), 0)
+  );
+}
+
+/**
+ * Mora que le corresponde a una cuota a día de hoy.
+ *
+ * Reproduce la fórmula del servidor (`acumular_mora` en SQL), que es quien
+ * la guarda: aquí sólo sirve para la vista previa y para explicarle al
+ * cobrador de dónde sale la cifra.
+ */
+export function calcularMoraCuota(
+  prestamo: Prestamo,
+  cuota: Cuota,
+  hoy: string
+): { dias: number; monto: number } {
+  if (!prestamo.mora_activa || !prestamo.mora_desde || cuota.estado === 'pagada') {
+    return { dias: 0, monto: redondearDinero(cuota.mora_acumulada || 0) };
+  }
+
+  const dias = diasDeMora(cuota.fecha_vencimiento, prestamo.mora_desde, hoy);
+  return { dias, monto: redondearDinero(Math.max(0, prestamo.mora_diaria || 0) * dias) };
 }

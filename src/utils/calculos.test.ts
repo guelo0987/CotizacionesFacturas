@@ -8,7 +8,11 @@ import {
   generarCalendarioCuotas,
   modalidadSegura,
   tasaAnualEquivalente,
+  calcularMoraCuota,
+  diasDeMora,
+  moraPendiente,
 } from './calculos';
+import type { Cuota, Prestamo } from '../types';
 import { redondearDinero } from './validacion';
 
 describe('calcularImporteLinea', () => {
@@ -363,5 +367,93 @@ describe('calcularSaldoFactura', () => {
     const r = calcularSaldoFactura(4130, 1376.67, 1376.67);
     expect(r.montoPagado).toBe(2753.34);
     expect(r.saldoPendiente).toBe(1376.66);
+  });
+});
+
+describe('mora por atraso', () => {
+  // El caso que planteó el cliente: cuota semanal que vence el viernes, el
+  // cobrador habilita la mora el sábado. Nunca cobra hacia atrás.
+  const VIERNES = '2026-09-11';
+  const SABADO = '2026-09-12';
+
+  describe('diasDeMora', () => {
+    it('no cobra el mismo día en que se habilita', () => {
+      expect(diasDeMora(VIERNES, SABADO, SABADO)).toBe(0);
+    });
+
+    it('cobra un día al día siguiente de habilitarla', () => {
+      expect(diasDeMora(VIERNES, SABADO, '2026-09-13')).toBe(1);
+    });
+
+    it('cuenta desde el vencimiento si la mora ya estaba activa', () => {
+      expect(diasDeMora(VIERNES, '2026-09-01', SABADO)).toBe(1);
+      expect(diasDeMora(VIERNES, '2026-09-01', '2026-09-18')).toBe(7);
+    });
+
+    it('no cobra nada antes del vencimiento', () => {
+      expect(diasDeMora('2026-09-30', '2026-09-01', SABADO)).toBe(0);
+    });
+
+    it('sin fecha de habilitación cuenta desde el vencimiento', () => {
+      expect(diasDeMora(VIERNES, null, '2026-09-14')).toBe(3);
+    });
+  });
+
+  describe('calcularMoraCuota', () => {
+    const prestamo = (extra: Partial<Prestamo> = {}): Prestamo =>
+      ({
+        id: 'p1', cliente_id: 'c1', monto_prestado: 10000, tasa_interes: 10,
+        modalidad_interes: 'por_periodo', interes_total: 4000, total_a_pagar: 14000,
+        num_cuotas: 4, frecuencia: 'semanal', fecha_inicio: '2026-09-04',
+        mora_activa: true, mora_diaria: 100, mora_modo: 'por_cuota', mora_desde: SABADO,
+        estado: 'atrasado', created_at: '', ...extra,
+      }) as Prestamo;
+
+    const cuota = (extra: Partial<Cuota> = {}): Cuota =>
+      ({
+        id: 'q1', prestamo_id: 'p1', numero: 1, fecha_vencimiento: VIERNES,
+        monto: 1000, mora_acumulada: 0, mora_pagada: 0, interes: 0, capital: 1000,
+        saldo_capital: 0, monto_pagado: 0, estado: 'atrasada', ...extra,
+      }) as Cuota;
+
+    it('cobra RD$100 por cada día de atraso', () => {
+      expect(calcularMoraCuota(prestamo(), cuota(), '2026-09-15')).toEqual({
+        dias: 3,
+        monto: 300,
+      });
+    });
+
+    it('no cobra nada con la mora deshabilitada', () => {
+      const r = calcularMoraCuota(prestamo({ mora_activa: false }), cuota(), '2026-09-15');
+      expect(r).toEqual({ dias: 0, monto: 0 });
+    });
+
+    it('congela la mora al saldar la cuota', () => {
+      const saldada = cuota({ estado: 'pagada', monto_pagado: 1000, mora_acumulada: 200 });
+      expect(calcularMoraCuota(prestamo(), saldada, '2026-09-30')).toEqual({
+        dias: 0,
+        monto: 200,
+      });
+    });
+
+    it('respeta el monto diario que ponga el cobrador', () => {
+      const r = calcularMoraCuota(prestamo({ mora_diaria: 250 }), cuota(), '2026-09-14');
+      expect(r).toEqual({ dias: 2, monto: 500 });
+    });
+  });
+
+  describe('moraPendiente', () => {
+    const base = {
+      id: 'q1', prestamo_id: 'p1', numero: 1, fecha_vencimiento: VIERNES, monto: 1000,
+      interes: 0, capital: 1000, saldo_capital: 0, monto_pagado: 0, estado: 'atrasada',
+    } as const;
+
+    it('descuenta lo que ya se cobró de mora', () => {
+      expect(moraPendiente({ ...base, mora_acumulada: 300, mora_pagada: 100 } as Cuota)).toBe(200);
+    });
+
+    it('nunca queda negativa', () => {
+      expect(moraPendiente({ ...base, mora_acumulada: 100, mora_pagada: 300 } as Cuota)).toBe(0);
+    });
   });
 });

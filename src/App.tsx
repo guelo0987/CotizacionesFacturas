@@ -554,13 +554,17 @@ export function App() {
   };
 
   const handleDeletePrestamo = async (prestamo: Prestamo) => {
-    const pagado = (prestamo.cuotas ?? []).reduce((acc, c) => acc + (c.monto_pagado || 0), 0);
+    // Lo que el cliente entregó de verdad: lo abonado a las cuotas y la mora
+    const pagado = (prestamo.cuotas ?? []).reduce(
+      (acc, c) => acc + (c.monto_pagado || 0) + (c.mora_pagada || 0),
+      0
+    );
     const confirmado = await confirmar({
       titulo: 'Eliminar préstamo',
       mensaje: '¿Eliminar este préstamo junto con su calendario de cuotas?',
       detalle:
         pagado > 0
-          ? `Atención: ya se cobraron ${pagado.toFixed(2)} de este préstamo. Al eliminarlo se pierde el registro de esos abonos.`
+          ? `Atención: ya se cobraron ${formatCurrency(pagado)} de este préstamo. Al eliminarlo se pierde el registro de esos pagos.`
           : undefined,
       textoConfirmar: 'Eliminar',
       peligroso: true,

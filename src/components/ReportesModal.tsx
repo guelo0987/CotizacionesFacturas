@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import type { AppState } from '../types';
-import { formatCurrency, formatDate } from '../utils/sanitizer';
+import { diaLocal, formatCurrency, formatDate, hoyLocal } from '../utils/sanitizer';
 import { formatearDocumento, formatearTelefono, redondearDinero } from '../utils/validacion';
 import { descargarCSV, generarCSV, nombreConFecha } from '../utils/exportar';
 import { MODALIDADES, modalidadSegura } from '../utils/calculos';
@@ -12,24 +12,22 @@ interface ReportesModalProps {
   onClose: () => void;
 }
 
-const primerDiaDelMes = () => {
-  const hoy = new Date();
-  return new Date(hoy.getFullYear(), hoy.getMonth(), 1).toISOString().split('T')[0];
-};
+const primerDiaDelMes = () => `${hoyLocal().slice(0, 8)}01`;
 
-const hoyISO = () => new Date().toISOString().split('T')[0];
-
-/** Compara sólo la parte de fecha, sin zona horaria. */
+/**
+ * Compara el día en hora local: un pago cobrado el 30 a las 9 p. m. es del
+ * 30 —y de ese mes—, aunque en UTC ya sea el 1.º del siguiente.
+ */
 const dentroDelRango = (fecha: string | null | undefined, desde: string, hasta: string) => {
   if (!fecha) return false;
-  const dia = fecha.split('T')[0];
+  const dia = diaLocal(fecha);
   return dia >= desde && dia <= hasta;
 };
 
 export const ReportesModal: React.FC<ReportesModalProps> = ({ state, onClose }) => {
   const { exito, error: avisarError } = useFeedback();
   const [desde, setDesde] = useState(primerDiaDelMes());
-  const [hasta, setHasta] = useState(hoyISO());
+  const [hasta, setHasta] = useState(hoyLocal());
 
   const nombreCliente = (id: string) =>
     state.clientes.find((c) => c.id === id)?.nombre ?? 'Cliente sin asignar';

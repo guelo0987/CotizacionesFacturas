@@ -17,9 +17,9 @@ import {
 import { montoTermico } from '../../utils/formatoTermico';
 import {
   METODOS_PAGO,
+  estadoTrasPago,
   referenciaAbono,
   referenciaPrestamo,
-  totalAbonado,
 } from '../../utils/documentosPrestamo';
 
 interface Props {
@@ -31,22 +31,25 @@ interface Props {
   settings: BusinessSettings;
 }
 
-/** Cifras del recibo, derivadas del préstamo, la cuota abonada y el pago. */
+/**
+ * Cifras del recibo: cómo quedaron la cuota y el préstamo con este pago,
+ * aunque se reimprima después de otros.
+ */
 function resumen(prestamo: Prestamo, cuota: Cuota, pago: Pago) {
-  const restaCuota = redondearDinero(cuota.monto - (cuota.monto_pagado || 0));
-  const abonado = totalAbonado(prestamo);
+  const estado = estadoTrasPago(prestamo, cuota, pago);
   const aMora = redondearDinero(pago.monto_mora || 0);
 
   return {
-    restaCuota,
-    saldoPrestamo: redondearDinero(Math.max(0, prestamo.total_a_pagar - abonado)),
+    ...estado,
     // El pago se reparte entre la mora y la cuota; el recibo tiene que
     // decir cuánto fue a cada cosa o el cliente no entiende por qué su
     // cuota bajó menos de lo que entregó.
     aMora,
     aCuota: redondearDinero(pago.monto - aMora),
-    moraCuota: moraPendiente(cuota),
-    moraPrestamo: moraPendientePrestamo(prestamo),
+    // De la mora sólo se sabe la de hoy: en la reimpresión de un abono
+    // anterior se omite en vez de mezclar fechas.
+    moraCuota: estado.esElUltimo ? moraPendiente(cuota) : 0,
+    moraPrestamo: estado.esElUltimo ? moraPendientePrestamo(prestamo) : 0,
   };
 }
 
@@ -62,11 +65,16 @@ export const ReciboAbonoA4: React.FC<Props> = ({
   cliente,
   settings,
 }) => {
-  const { restaCuota, saldoPrestamo, aMora, aCuota, moraCuota, moraPrestamo } = resumen(
-    prestamo,
-    cuota,
-    pago
-  );
+  const {
+    abonadoCuota,
+    restaCuota,
+    abonadoTotal,
+    saldoPrestamo,
+    aMora,
+    aCuota,
+    moraCuota,
+    moraPrestamo,
+  } = resumen(prestamo, cuota, pago);
 
   return (
     <div
@@ -150,7 +158,7 @@ export const ReciboAbonoA4: React.FC<Props> = ({
           <div className="flex justify-between text-slate-700">
             <span>Abonado a la cuota:</span>
             <span className="font-semibold text-emerald-700">
-              {formatCurrency(cuota.monto_pagado)}
+              {formatCurrency(abonadoCuota)}
             </span>
           </div>
           {moraCuota > 0 ? (
@@ -180,7 +188,7 @@ export const ReciboAbonoA4: React.FC<Props> = ({
           <div className="flex justify-between text-slate-700">
             <span>Abonado en total:</span>
             <span className="font-semibold text-emerald-700">
-              {formatCurrency(totalAbonado(prestamo))}
+              {formatCurrency(abonadoTotal)}
             </span>
           </div>
           {moraPrestamo > 0 ? (
@@ -233,11 +241,16 @@ export const ReciboAbonoTermico: React.FC<Props & { formato: FormatoImpresion }>
   const titulo = estrecho ? 'text-[12px]' : 'text-[14px]';
   const grande = estrecho ? 'text-[15px]' : 'text-[18px]';
 
-  const { restaCuota, saldoPrestamo, aMora, aCuota, moraCuota, moraPrestamo } = resumen(
-    prestamo,
-    cuota,
-    pago
-  );
+  const {
+    abonadoCuota,
+    restaCuota,
+    abonadoTotal,
+    saldoPrestamo,
+    aMora,
+    aCuota,
+    moraCuota,
+    moraPrestamo,
+  } = resumen(prestamo, cuota, pago);
 
   return (
     <HojaTermica id={id} formato={formato}>
@@ -286,7 +299,7 @@ export const ReciboAbonoTermico: React.FC<Props & { formato: FormatoImpresion }>
         </div>
         <FilaTermica etiqueta="Vence:" valor={formatDate(cuota.fecha_vencimiento)} />
         <FilaTermica etiqueta="Monto cuota:" valor={monto(cuota.monto)} />
-        <FilaTermica etiqueta="Abonado:" valor={monto(cuota.monto_pagado)} />
+        <FilaTermica etiqueta="Abonado:" valor={monto(abonadoCuota)} />
         <FilaTermica
           etiqueta={restaCuota <= 0 ? 'Cuota:' : 'Resta cuota:'}
           valor={restaCuota <= 0 ? 'SALDADA' : monto(restaCuota)}
@@ -302,7 +315,7 @@ export const ReciboAbonoTermico: React.FC<Props & { formato: FormatoImpresion }>
       <div className="space-y-0.5">
         <div className="font-bold uppercase">Estado del préstamo</div>
         <FilaTermica etiqueta="Total a pagar:" valor={monto(prestamo.total_a_pagar)} />
-        <FilaTermica etiqueta="Abonado total:" valor={monto(totalAbonado(prestamo))} />
+        <FilaTermica etiqueta="Abonado total:" valor={monto(abonadoTotal)} />
         {moraPrestamo > 0 ? (
           <FilaTermica etiqueta="Mora pendiente:" valor={monto(moraPrestamo)} fuerte />
         ) : null}

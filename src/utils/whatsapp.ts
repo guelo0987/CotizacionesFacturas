@@ -1,6 +1,7 @@
 import type { Cotizacion, Factura, Prestamo, Cuota, Pago, Cliente, BusinessSettings } from '../types';
 import { formatCurrency, formatDate } from './sanitizer';
 import { telefonoParaWhatsapp } from './validacion';
+import { estadoTrasPago } from './documentosPrestamo';
 
 export function construirUrl(mensaje: string, telefono?: string | null): string {
   const encoded = encodeURIComponent(mensaje);
@@ -114,8 +115,8 @@ export function mensajeAbono(
   settings?: BusinessSettings
 ): string {
   const businessName = settings?.business_name || 'Nuestro negocio';
-  const abonado = (prestamo.cuotas ?? []).reduce((a, c) => a + (c.monto_pagado || 0), 0);
-  const saldo = Math.max(0, prestamo.total_a_pagar - abonado);
+  // El saldo que dejó este abono, igual que en el recibo que acompaña
+  const saldo = estadoTrasPago(prestamo, cuota, pago).saldoPrestamo;
 
   let msg = `*Recibo de abono — ${businessName}*\n\n`;
   msg += `Hola *${cliente?.nombre || 'Cliente'}*,\n`;

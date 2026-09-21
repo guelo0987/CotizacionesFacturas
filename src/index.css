@@ -134,6 +134,9 @@
   body.imprimiendo .zona-impresion.documento-a4 {
     width: 100% !important;
     max-width: none !important;
+    /* El margen de la página ya deja el blanco de abajo; el relleno de la
+       hoja, cuando el contenido la llenaba justo, abría una página vacía. */
+    padding-bottom: 0 !important;
   }
 
   /* El recibo térmico NO se estira: su ancho en píxeles ya equivale

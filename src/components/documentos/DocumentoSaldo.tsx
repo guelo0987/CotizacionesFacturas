@@ -64,10 +64,12 @@ function referenciaSaldo(prestamo: Prestamo): string {
 export const ReciboSaldoA4: React.FC<Props> = ({ id, prestamo, pagos, cliente, settings }) => {
   const r = resumen(prestamo, pagos);
 
+  // Compacto a propósito: un préstamo de muchas cuotas saldado temprano
+  // lista varias filas, y el recibo tiene que seguir cabiendo en una hoja.
   return (
     <div
       id={id}
-      className="documento-a4 bg-white text-slate-900 p-8 rounded-lg shadow-sm font-sans mx-auto space-y-6"
+      className="documento-a4 bg-white text-slate-900 p-8 rounded-lg shadow-sm font-sans mx-auto space-y-4"
     >
       <div className="flex justify-between items-start border-b border-slate-200 pb-5 gap-4">
         <DatosNegocioA4 settings={settings} />
@@ -82,29 +84,31 @@ export const ReciboSaldoA4: React.FC<Props> = ({ id, prestamo, pagos, cliente, s
         </TituloDocumentoA4>
       </div>
 
-      <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 text-xs space-y-1">
-        <div className="font-bold uppercase tracking-wider text-slate-500 text-[10px]">
-          Recibido de
-        </div>
-        <div className="text-sm font-bold text-slate-900">{cliente?.nombre || 'Cliente'}</div>
-        {cliente?.documento ? (
-          <div className="text-slate-700 font-mono">
-            RNC/Cédula: {formatDocumento(cliente.documento)}
+      <div className="grid grid-cols-2 gap-4">
+        <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 text-xs space-y-1">
+          <div className="font-bold uppercase tracking-wider text-slate-500 text-[10px]">
+            Recibido de
           </div>
-        ) : null}
-        {cliente?.telefono ? (
-          <div className="text-slate-700">Teléfono: {formatTelefono(cliente.telefono)}</div>
-        ) : null}
-      </div>
-
-      <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-5 text-center">
-        <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-800">
-          Monto recibido para saldar el préstamo
+          <div className="text-sm font-bold text-slate-900">{cliente?.nombre || 'Cliente'}</div>
+          {cliente?.documento ? (
+            <div className="text-slate-700 font-mono">
+              RNC/Cédula: {formatDocumento(cliente.documento)}
+            </div>
+          ) : null}
+          {cliente?.telefono ? (
+            <div className="text-slate-700">Teléfono: {formatTelefono(cliente.telefono)}</div>
+          ) : null}
         </div>
-        <div className="text-3xl font-black text-emerald-700 mt-1">{formatCurrency(r.total)}</div>
-        <div className="text-xs text-slate-600 mt-1">
-          {r.metodo}
-          {r.referencia ? ` · Ref: ${r.referencia}` : ''}
+
+        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 text-center flex flex-col justify-center">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-800">
+            Monto recibido para saldar el préstamo
+          </div>
+          <div className="text-3xl font-black text-emerald-700 mt-1">{formatCurrency(r.total)}</div>
+          <div className="text-xs text-slate-600 mt-1">
+            {r.metodo}
+            {r.referencia ? ` · Ref: ${r.referencia}` : ''}
+          </div>
         </div>
       </div>
 
@@ -125,16 +129,16 @@ export const ReciboSaldoA4: React.FC<Props> = ({ id, prestamo, pagos, cliente, s
           <tbody className="divide-y divide-slate-200">
             {r.lineas.map((l) => (
               <tr key={l.numero}>
-                <td className="p-2 text-slate-700">
+                <td className="px-2 py-1.5 text-slate-700">
                   #{l.numero} de {prestamo.num_cuotas}
                 </td>
-                <td className="p-2 text-right text-slate-700">{formatCurrency(l.aCuota)}</td>
+                <td className="px-2 py-1.5 text-right text-slate-700">{formatCurrency(l.aCuota)}</td>
                 {r.totalMora > 0 ? (
-                  <td className="p-2 text-right text-amber-800">
+                  <td className="px-2 py-1.5 text-right text-amber-800">
                     {l.mora > 0 ? formatCurrency(l.mora) : '—'}
                   </td>
                 ) : null}
-                <td className="p-2 text-right font-bold text-slate-900">
+                <td className="px-2 py-1.5 text-right font-bold text-slate-900">
                   {formatCurrency(redondearDinero(l.aCuota + l.mora))}
                 </td>
               </tr>
@@ -143,7 +147,7 @@ export const ReciboSaldoA4: React.FC<Props> = ({ id, prestamo, pagos, cliente, s
         </table>
       </div>
 
-      <div className="flex justify-end">
+      <div className="flex justify-end break-inside-avoid">
         <div className="w-72 space-y-1.5 text-xs bg-slate-50 p-3 rounded-lg border border-slate-200">
           <div className="flex justify-between text-slate-700">
             <span>Cuotas e intereses:</span>
@@ -165,7 +169,7 @@ export const ReciboSaldoA4: React.FC<Props> = ({ id, prestamo, pagos, cliente, s
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-8 pt-10 text-[10px] text-slate-500">
+      <div className="grid grid-cols-2 gap-8 pt-8 text-[10px] text-slate-500 break-inside-avoid">
         <div className="border-t border-slate-400 pt-1 text-center">Firma del cliente</div>
         <div className="border-t border-slate-400 pt-1 text-center">
           Recibí por {settings.business_name || 'el negocio'}

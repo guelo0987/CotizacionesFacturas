@@ -1,5 +1,6 @@
-import type { Pago, Prestamo } from '../types';
+import type { Cuota, Pago, Prestamo } from '../types';
 import { FRECUENCIAS, frecuenciaSegura, modalidadSegura } from './calculos';
+import { redondearDinero } from './validacion';
 
 /**
  * Datos derivados que necesitan el comprobante de préstamo y el recibo de
@@ -37,6 +38,59 @@ export function descripcionInteres(prestamo: Prestamo): string {
 /** Total abonado hasta ahora, sumando lo pagado en cada cuota. */
 export function totalAbonado(prestamo: Prestamo): number {
   return (prestamo.cuotas ?? []).reduce((suma, c) => suma + (c.monto_pagado || 0), 0);
+}
+
+export interface EstadoTrasPago {
+  /** Lo abonado a la cuota hasta ese pago, sin contar la mora. */
+  abonadoCuota: number;
+  restaCuota: number;
+  /** Lo abonado al préstamo hasta ese pago, sin contar la mora. */
+  abonadoTotal: number;
+  saldoPrestamo: number;
+  /** Es el pago más reciente del préstamo: lo de hoy también vale para él. */
+  esElUltimo: boolean;
+}
+
+/** Instante de un pago, para ordenar la historia. */
+function instante(pago: Pago): number {
+  const t = Date.parse(pago.fecha);
+  return Number.isFinite(t) ? t : 0;
+}
+
+/**
+ * Cómo quedaron la cuota y el préstamo justo después de un pago.
+ *
+ * Un recibo reimpreso días después tiene que decir lo mismo que el
+ * original. Con el estado de hoy, el recibo de la primera cuota de un
+ * préstamo ya saldado diría «saldo RD$0.00, préstamo saldado».
+ */
+export function estadoTrasPago(prestamo: Prestamo, cuota: Cuota, pago: Pago): EstadoTrasPago {
+  const resultado = (abonadoCuota: number, abonadoTotal: number, esElUltimo: boolean) => ({
+    abonadoCuota: redondearDinero(abonadoCuota),
+    restaCuota: redondearDinero(Math.max(0, cuota.monto - abonadoCuota)),
+    abonadoTotal: redondearDinero(abonadoTotal),
+    saldoPrestamo: redondearDinero(Math.max(0, prestamo.total_a_pagar - abonadoTotal)),
+    esElUltimo,
+  });
+
+  // Sin el historial de pagos sólo se puede dar el estado de hoy
+  if (!prestamo.pagos) {
+    return resultado(cuota.monto_pagado || 0, totalAbonado(prestamo), true);
+  }
+
+  const pagos = prestamo.pagos.some((p) => p.id === pago.id)
+    ? prestamo.pagos
+    : [...prestamo.pagos, pago];
+  const limite = instante(pago);
+  // Los pagos de una misma operación —un saldo— comparten instante: van juntos
+  const hasta = pagos.filter((p) => instante(p) <= limite);
+  const aLaCuota = (p: Pago) => (p.monto || 0) - (p.monto_mora || 0);
+
+  return resultado(
+    hasta.filter((p) => p.cuota_id === cuota.id).reduce((s, p) => s + aLaCuota(p), 0),
+    hasta.reduce((s, p) => s + aLaCuota(p), 0),
+    hasta.length === pagos.length
+  );
 }
 
 export const METODOS_PAGO: Record<string, string> = {

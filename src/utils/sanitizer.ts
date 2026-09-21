@@ -34,12 +34,49 @@ export function formatCurrency(amount: number | string | undefined | null): stri
   return formateado.replace(/DOP\s?/, 'RD$ ').replace(/\s+/g, ' ').trim();
 }
 
-/** Fecha dominicana (22/07/2026) sin desplazamiento de zona horaria. */
+/**
+ * Día (AAAA-MM-DD) de una fecha tal como se vivió en la zona del usuario.
+ *
+ * Las columnas de sólo fecha llegan como «2026-09-21» y se respetan tal
+ * cual. Las de fecha y hora —el momento de un pago— llegan en UTC:
+ * «2026-09-22T01:30:00+00:00» es todavía el 21, a las 9:30 p. m., en Santo
+ * Domingo. Quedarse con lo que va antes de la «T» daría el día siguiente.
+ */
+export function diaLocal(valor: string, zonaHoraria?: string): string {
+  const texto = String(valor ?? '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(texto)) return texto;
+  if (!/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(texto)) return texto.split('T')[0];
+
+  // Lo que puede devolver Postgres: espacio en vez de «T», microsegundos y
+  // la zona abreviada «+00», que no todos los navegadores interpretan.
+  const iso = texto
+    .replace(' ', 'T')
+    .replace(/(\.\d{3})\d+/, '$1')
+    .replace(/([+-]\d{2})$/, '$1:00');
+  const momento = new Date(iso);
+  if (Number.isNaN(momento.getTime())) return texto.slice(0, 10);
+
+  const partes = new Intl.DateTimeFormat('en-CA', {
+    timeZone: zonaHoraria,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(momento);
+  const parte = (tipo: string) => partes.find((p) => p.type === tipo)?.value ?? '';
+  return `${parte('year')}-${parte('month')}-${parte('day')}`;
+}
+
+/** Hoy (AAAA-MM-DD) en hora local: pasadas las 8 p. m. en RD, UTC ya va por mañana. */
+export function hoyLocal(): string {
+  return diaLocal(new Date().toISOString());
+}
+
+/** Fecha dominicana (22/07/2026) del día en que ocurrió, en hora local. */
 export function formatDate(dateString: string | undefined | null): string {
   if (!dateString) return '';
   try {
     if (typeof dateString === 'string' && dateString.includes('-')) {
-      const parts = dateString.split('T')[0].split('-');
+      const parts = diaLocal(dateString).split('-');
       if (parts.length === 3) {
         const [year, month, day] = parts;
         return `${day.padStart(2, '0')}/${month.padStart(2, '0')}/${year}`;

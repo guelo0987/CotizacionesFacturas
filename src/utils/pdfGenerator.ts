@@ -34,6 +34,21 @@ function elementoODescartar(elementId: string, accion: string): HTMLElement {
 function opciones(filename: string, formato: DefinicionFormato, element: HTMLElement) {
   const alto = formato.termico ? altoPaginaMm(formato, element.scrollHeight) : 297;
 
+  // La hoja A4 se captura sin su relleno inferior: el margen de la página
+  // ya deja ese blanco, y cuando el contenido llenaba la hoja justo, esos
+  // píxeles vacíos abrían una segunda página en blanco. Se quita en la copia
+  // que rasteriza html2canvas —cuando html2pdf ya metió sus saltos de
+  // página, que alargan la hoja—, nunca en la vista previa.
+  const sinRellenoInferior = formato.termico
+    ? {}
+    : {
+        onclone: (copia: Document) => {
+          copia.querySelectorAll<HTMLElement>('.documento-a4').forEach((hoja) => {
+            hoja.style.paddingBottom = '0px';
+          });
+        },
+      };
+
   return {
     margin: [
       formato.margenVerticalMm,
@@ -49,6 +64,7 @@ function opciones(filename: string, formato: DefinicionFormato, element: HTMLEle
       allowTaint: false,
       logging: false,
       backgroundColor: '#ffffff',
+      ...sinRellenoInferior,
     },
     jsPDF: {
       unit: 'mm',

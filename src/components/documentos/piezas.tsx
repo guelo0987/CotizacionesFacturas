@@ -48,7 +48,8 @@ export const TituloDocumentoA4: React.FC<{ titulo: string; numero?: string; chil
 
 /** Pie con la nota legal y el código QR del negocio. */
 export const PieDocumentoA4: React.FC<{ settings: BusinessSettings }> = ({ settings }) => (
-  <div className="pt-6 border-t border-slate-200 flex items-end justify-between gap-4">
+  // Nunca partido entre dos páginas: el QR cortado por la mitad no se lee
+  <div className="pt-6 border-t border-slate-200 flex items-end justify-between gap-4 break-inside-avoid">
     <div className="text-[10px] text-slate-400">
       Documento generado electrónicamente por{' '}
       {settings.business_name || 'Sistema de Cotizaciones y Facturas'}.

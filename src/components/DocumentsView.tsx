@@ -8,7 +8,7 @@ import type {
   Servicio,
 } from '../types';
 import type { SolicitudApertura } from '../App';
-import { formatCurrency, formatDate } from '../utils/sanitizer';
+import { diaLocal, formatCurrency, formatDate, hoyLocal } from '../utils/sanitizer';
 import { calcularImporteLinea, calcularTotalesDocumento } from '../utils/calculos';
 import {
   limpiarTexto,
@@ -90,7 +90,7 @@ const lineaVacia = (): LineaEditable => ({
   importe: 0,
 });
 
-const hoyISO = () => new Date().toISOString().split('T')[0];
+const hoyISO = hoyLocal;
 
 export const DocumentsView: React.FC<DocumentsViewProps> = ({
   state,
@@ -180,7 +180,7 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
     setErrorForm('');
     setFormData({
       cliente_id: doc.cliente_id,
-      fecha: (doc.fecha ?? '').split('T')[0] || hoyISO(),
+      fecha: diaLocal(doc.fecha ?? '') || hoyISO(),
       validez_dias: (doc as Cotizacion).validez_dias ?? 15,
       ncf: factura?.ncf ?? '',
       aplica_itbis: doc.aplica_itbis,

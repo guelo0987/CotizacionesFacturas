@@ -9,7 +9,7 @@ import type {
   Prestamo,
 } from '../types';
 import type { SolicitudApertura } from '../App';
-import { formatCurrency, formatDate } from '../utils/sanitizer';
+import { formatCurrency, formatDate, hoyLocal } from '../utils/sanitizer';
 import {
   FRECUENCIAS,
   FRECUENCIAS_VALIDAS,
@@ -106,7 +106,7 @@ const FORM_INICIAL: FormularioPrestamo = {
   num_cuotas: 4,
   frecuencia: 'quincenal',
   modalidad_interes: 'por_periodo',
-  fecha_inicio: new Date().toISOString().split('T')[0],
+  fecha_inicio: hoyLocal(),
 };
 
 export const LoansView: React.FC<LoansViewProps> = ({
@@ -186,12 +186,14 @@ export const LoansView: React.FC<LoansViewProps> = ({
   );
 
   const frecuenciaActual = FRECUENCIAS[frecuenciaSegura(formData.frecuencia)];
+  // Día en UTC a propósito: es el mismo `current_date` con el que el
+  // servidor acumula la mora, y los días que se muestran deben cuadrar.
   const hoyISO = new Date().toISOString().split('T')[0];
 
   const abrirCreacion = React.useCallback(() => {
     setEditandoId(null);
     setErrorForm('');
-    setFormData({ ...FORM_INICIAL, fecha_inicio: new Date().toISOString().split('T')[0] });
+    setFormData({ ...FORM_INICIAL, fecha_inicio: hoyLocal() });
     setIsModalOpen(true);
   }, []);
 
@@ -1264,7 +1266,25 @@ export const LoansView: React.FC<LoansViewProps> = ({
                             </span>
                           )}
 
-                          {ultimoAbono ? (
+                          {/* Si la cuota se liquidó al saldar el préstamo, su
+                              comprobante es el recibo del saldo completo: el
+                              cliente entregó un solo pago, no uno por cuota. */}
+                          {ultimoAbono?.saldo_de_prestamo ? (
+                            <button
+                              onClick={() =>
+                                setDocumentoPdf({
+                                  tipo: 'saldo',
+                                  prestamo: selectedPrestamo,
+                                  pagos: pagosDelSaldo(selectedPrestamo),
+                                })
+                              }
+                              className="p-1 text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-md border border-slate-200"
+                              title="Recibo del saldo del préstamo"
+                              aria-label={`Recibo de saldo de la cuota ${cuota.numero}`}
+                            >
+                              <Receipt className="w-3 h-3" />
+                            </button>
+                          ) : ultimoAbono ? (
                             <button
                               onClick={() =>
                                 setDocumentoPdf({

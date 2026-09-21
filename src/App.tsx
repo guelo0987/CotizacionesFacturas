@@ -472,6 +472,31 @@ export function App() {
     exito(datos.id ? 'Préstamo actualizado.' : 'Préstamo creado con su calendario de cuotas.');
   };
 
+  /** Devuelve el préstamo saldado, para abrir su recibo enseguida. */
+  const handleSaldarPrestamo = async (
+    prestamoId: string,
+    montoEsperado: number,
+    metodo: MetodoPago,
+    referencia?: string
+  ): Promise<Prestamo> => {
+    const saldado = await supabaseDataService.saldarPrestamo(
+      prestamoId,
+      montoEsperado,
+      metodo,
+      referencia
+    );
+    setState((prev) => ({
+      ...prev,
+      prestamos: prev.prestamos.map((p) => (p.id === saldado.id ? saldado : p)),
+      pagos: [
+        ...prev.pagos.filter((p) => p.prestamo_id !== saldado.id),
+        ...(saldado.pagos ?? []),
+      ],
+    }));
+    exito(`Préstamo saldado: se cobraron ${formatCurrency(montoEsperado)}.`);
+    return saldado;
+  };
+
   const handleConfigurarMora = async (
     prestamoId: string,
     activa: boolean,
@@ -670,6 +695,7 @@ export function App() {
             onGuardarPrestamo={handleGuardarPrestamo}
             onRegistrarPagoCuota={handleRegistrarPagoCuota}
             onConfigurarMora={handleConfigurarMora}
+            onSaldarPrestamo={handleSaldarPrestamo}
             onDeletePrestamo={handleDeletePrestamo}
           />
         ) : null}

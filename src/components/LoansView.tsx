@@ -23,6 +23,7 @@ import {
   moraPendientePrestamo,
   modoMoraSeguro,
   simularMora,
+  calcularSaldoParaSaldar,
   frecuenciaSegura,
   modalidadSegura,
   tasaAnualEquivalente,
@@ -51,6 +52,7 @@ import {
   Info,
   Landmark,
   AlertTriangle,
+  BadgeCheck,
   Plus,
   Printer,
   Receipt,
@@ -79,6 +81,12 @@ interface LoansViewProps {
     modo: ModoMora,
     retroactiva?: boolean
   ) => Promise<void>;
+  onSaldarPrestamo: (
+    prestamoId: string,
+    montoEsperado: number,
+    metodo: MetodoPago,
+    referencia?: string
+  ) => Promise<Prestamo>;
 }
 
 interface FormularioPrestamo {
@@ -108,6 +116,7 @@ export const LoansView: React.FC<LoansViewProps> = ({
   onRegistrarPagoCuota,
   onDeletePrestamo,
   onConfigurarMora,
+  onSaldarPrestamo,
 }) => {
   const [search, setSearch] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -117,6 +126,11 @@ export const LoansView: React.FC<LoansViewProps> = ({
   const [errorForm, setErrorForm] = useState('');
 
   const [documentoPdf, setDocumentoPdf] = useState<DocumentoPrestamo | null>(null);
+
+  // Saldar el préstamo de una vez
+  const [saldandoId, setSaldandoId] = useState<string | null>(null);
+  const [saldoMetodo, setSaldoMetodo] = useState<MetodoPago>('efectivo');
+  const [saldoRef, setSaldoRef] = useState('');
 
   // Configuración de la mora del préstamo abierto
   const [editandoMora, setEditandoMora] = useState(false);
@@ -286,6 +300,50 @@ export const LoansView: React.FC<LoansViewProps> = ({
     );
 
     if (ok) setCuotaPagoId(null);
+  };
+
+  // ---------------------------------------------------------------
+  // Saldar el préstamo
+  // ---------------------------------------------------------------
+  const prestamoSaldando = useMemo(
+    () => state.prestamos.find((p) => p.id === saldandoId) ?? null,
+    [state.prestamos, saldandoId]
+  );
+
+  const abrirSaldo = (prestamo: Prestamo) => {
+    setSaldandoId(prestamo.id);
+    setSaldoMetodo('efectivo');
+    setSaldoRef('');
+  };
+
+  /** Pagos que generó el saldo de un préstamo, para su recibo. */
+  const pagosDelSaldo = (prestamo: Prestamo) =>
+    (prestamo.pagos ?? []).filter((pago) => pago.saldo_de_prestamo);
+
+  const confirmarSaldo = async () => {
+    if (!prestamoSaldando) return;
+    const { total } = calcularSaldoParaSaldar(prestamoSaldando);
+
+    let saldado: Prestamo | null = null;
+    const ok = await ejecutar(async () => {
+      saldado = await onSaldarPrestamo(
+        prestamoSaldando.id,
+        total,
+        saldoMetodo,
+        limpiarTexto(saldoRef, 120) || undefined
+      );
+    });
+
+    if (ok && saldado) {
+      setSaldandoId(null);
+      // El cobrador acaba de recibir el dinero: lo siguiente es darle el
+      // recibo al cliente, así que se abre sin tener que buscarlo.
+      setDocumentoPdf({
+        tipo: 'saldo',
+        prestamo: saldado,
+        pagos: pagosDelSaldo(saldado),
+      });
+    }
   };
 
   // ---------------------------------------------------------------
@@ -1241,6 +1299,34 @@ export const LoansView: React.FC<LoansViewProps> = ({
               </div>
             </div>
 
+            {/* Saldar de una vez, o reimprimir el recibo si ya se saldó */}
+            {selectedPrestamo.estado !== 'saldado' ? (
+              <button
+                onClick={() => abrirSaldo(selectedPrestamo)}
+                className="w-full flex items-center justify-between gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm px-4 py-2.5 rounded-xl shadow-md shadow-emerald-600/20 transition-colors"
+              >
+                <span className="flex items-center gap-2">
+                  <BadgeCheck className="w-4 h-4" /> Saldar préstamo
+                </span>
+                <span className="tabular-nums">
+                  {formatCurrency(calcularSaldoParaSaldar(selectedPrestamo).total)}
+                </span>
+              </button>
+            ) : pagosDelSaldo(selectedPrestamo).length > 0 ? (
+              <button
+                onClick={() =>
+                  setDocumentoPdf({
+                    tipo: 'saldo',
+                    prestamo: selectedPrestamo,
+                    pagos: pagosDelSaldo(selectedPrestamo),
+                  })
+                }
+                className="w-full flex items-center justify-center gap-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold text-sm px-4 py-2.5 rounded-xl transition-colors"
+              >
+                <Receipt className="w-4 h-4" /> Recibo de saldo
+              </button>
+            ) : null}
+
             <div className="pt-2 border-t border-slate-200 flex items-center justify-between gap-2 text-sm">
               <button
                 onClick={() =>
@@ -1277,6 +1363,132 @@ export const LoansView: React.FC<LoansViewProps> = ({
             </div>
           </div>
         </div>
+      ) : null}
+
+      {/* Confirmar el saldo: la cifra y su desglose, antes de cobrar */}
+      {prestamoSaldando ? (
+        (() => {
+          const saldo = calcularSaldoParaSaldar(prestamoSaldando);
+          return (
+            <div className="fixed inset-0 z-[60] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-white border border-slate-200 rounded-2xl max-w-sm w-full p-5 space-y-4 shadow-2xl max-h-[92vh] flex flex-col">
+                <div className="flex items-start justify-between border-b border-slate-200 pb-3 gap-2">
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900">Saldar préstamo</h3>
+                    <p className="text-sm text-slate-500 truncate">
+                      {nombreCliente(prestamoSaldando.cliente_id)}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setSaldandoId(null)}
+                    className="text-slate-400 hover:text-slate-700"
+                    aria-label="Cerrar"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="overflow-y-auto space-y-3 pr-1">
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm space-y-1">
+                    <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                      Se liquida
+                    </div>
+                    {saldo.lineas.map((l) => (
+                      <div key={l.cuotaId} className="flex justify-between text-slate-700">
+                        <span>
+                          Cuota #{l.numero}
+                          {l.mora > 0 ? (
+                            <span className="text-amber-800"> + mora</span>
+                          ) : null}
+                        </span>
+                        <span className="tabular-nums">
+                          {formatCurrency(redondearDinero(l.restante + l.mora))}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="space-y-1 text-sm">
+                    <div className="flex justify-between text-slate-600">
+                      <span>Cuotas e intereses:</span>
+                      <span className="font-semibold">{formatCurrency(saldo.totalCuotas)}</span>
+                    </div>
+                    {saldo.totalMora > 0 ? (
+                      <div className="flex justify-between text-amber-900">
+                        <span>Mora:</span>
+                        <span className="font-semibold">{formatCurrency(saldo.totalMora)}</span>
+                      </div>
+                    ) : null}
+                    <div className="flex justify-between items-center bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 mt-1">
+                      <span className="font-bold text-emerald-900">Total para saldar:</span>
+                      <span className="text-lg font-black text-emerald-700 tabular-nums">
+                        {formatCurrency(saldo.total)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="saldo-metodo"
+                      className="block text-sm font-semibold text-slate-700 mb-1"
+                    >
+                      Método de pago
+                    </label>
+                    <select
+                      id="saldo-metodo"
+                      value={saldoMetodo}
+                      onChange={(e) => setSaldoMetodo(e.target.value as MetodoPago)}
+                      className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-emerald-500"
+                    >
+                      <option value="efectivo">Efectivo</option>
+                      <option value="transferencia">Transferencia bancaria</option>
+                      <option value="tarjeta">Tarjeta de crédito o débito</option>
+                      <option value="otro">Otro</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="saldo-ref"
+                      className="block text-sm font-semibold text-slate-700 mb-1"
+                    >
+                      Referencia <span className="font-normal text-slate-400">— opcional</span>
+                    </label>
+                    <input
+                      id="saldo-ref"
+                      type="text"
+                      maxLength={120}
+                      value={saldoRef}
+                      onChange={(e) => setSaldoRef(e.target.value)}
+                      className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+
+                  <p className="text-[11px] text-slate-500 leading-snug">
+                    Se cobran todas las cuotas pendientes completas, con sus intereses, más la
+                    mora. El préstamo queda saldado y no se puede deshacer.
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-200">
+                  <button
+                    onClick={() => setSaldandoId(null)}
+                    className="px-4 py-2 rounded-xl text-sm font-semibold bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={() => void confirmarSaldo()}
+                    disabled={ejecutando || saldo.total <= 0}
+                    className="px-4 py-2 rounded-xl text-sm font-bold bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white transition-colors"
+                  >
+                    {ejecutando ? 'Saldando…' : `Cobrar ${formatCurrency(saldo.total)}`}
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()
       ) : null}
 
       {/* Comprobante del préstamo o recibo de abono */}

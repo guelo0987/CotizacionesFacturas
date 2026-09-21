@@ -12,6 +12,7 @@ import {
   diasDeMora,
   moraPendiente,
   simularMora,
+  calcularSaldoParaSaldar,
 } from './calculos';
 import type { Cuota, Prestamo } from '../types';
 import { redondearDinero } from './validacion';
@@ -516,5 +517,70 @@ describe('simularMora', () => {
     const p = prestamo();
     p.cuotas![0].estado = 'pagada';
     expect(simularMora(p, 100, 'por_cuota', true, HOY)).toEqual({ total: 200, cuotas: 1 });
+  });
+});
+
+describe('calcularSaldoParaSaldar', () => {
+  const cuota = (numero: number, extra: Partial<Cuota> = {}): Cuota =>
+    ({
+      id: `q${numero}`, prestamo_id: 'p1', numero, fecha_vencimiento: '2026-09-01',
+      monto: 3292.34, mora_acumulada: 0, mora_pagada: 0, interes: 0, capital: 0,
+      saldo_capital: 0, monto_pagado: 0, estado: 'pendiente', ...extra,
+    }) as Cuota;
+
+  const prestamo = (cuotas: Cuota[]): Prestamo =>
+    ({
+      id: 'p1', cliente_id: 'c1', monto_prestado: 10000, tasa_interes: 12,
+      modalidad_interes: 'amortizado', interes_total: 3169.38, total_a_pagar: 13169.38,
+      num_cuotas: 4, frecuencia: 'quincenal', fecha_inicio: '2026-08-01',
+      mora_activa: false, mora_diaria: 0, mora_modo: 'por_cuota', mora_desde: null,
+      mora_retroactiva: false, estado: 'activo', created_at: '', cuotas,
+    }) as Prestamo;
+
+  it('cobra todas las cuotas que restan, con sus intereses', () => {
+    // Pagó la primera: restan tres cuotas completas (la última absorbe el redondeo)
+    const r = calcularSaldoParaSaldar(
+      prestamo([
+        cuota(1, { monto_pagado: 3292.34, estado: 'pagada' }),
+        cuota(2),
+        cuota(3),
+        cuota(4, { monto: 3292.36 }),
+      ])
+    );
+    expect(r.lineas.map((l) => l.numero)).toEqual([2, 3, 4]);
+    expect(r.totalCuotas).toBe(9877.04);
+    expect(r.total).toBe(9877.04);
+  });
+
+  it('descuenta lo que ya se abonó de una cuota a medias', () => {
+    const r = calcularSaldoParaSaldar(prestamo([cuota(1, { monto: 1000, monto_pagado: 700 })]));
+    expect(r.totalCuotas).toBe(300);
+  });
+
+  it('incluye la mora pendiente, o el préstamo no quedaría saldado', () => {
+    const r = calcularSaldoParaSaldar(
+      prestamo([
+        cuota(1, { monto: 1000, mora_acumulada: 600, mora_pagada: 100 }),
+        cuota(2, { monto: 1000 }),
+      ])
+    );
+    expect(r.totalCuotas).toBe(2000);
+    expect(r.totalMora).toBe(500);
+    expect(r.total).toBe(2500);
+  });
+
+  it('una cuota pagada pero con mora pendiente sigue contando', () => {
+    const r = calcularSaldoParaSaldar(
+      prestamo([cuota(1, { monto: 1000, monto_pagado: 1000, estado: 'pagada', mora_acumulada: 300 })])
+    );
+    expect(r.lineas).toHaveLength(1);
+    expect(r.total).toBe(300);
+  });
+
+  it('un préstamo saldado no debe nada', () => {
+    const r = calcularSaldoParaSaldar(
+      prestamo([cuota(1, { monto: 1000, monto_pagado: 1000, estado: 'pagada' })])
+    );
+    expect(r).toEqual({ lineas: [], totalCuotas: 0, totalMora: 0, total: 0 });
   });
 });

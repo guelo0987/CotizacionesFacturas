@@ -131,6 +131,29 @@ export function mensajeAbono(
   return msg;
 }
 
+/** Resumen del saldo para acompañar a su recibo en PDF. */
+export function mensajeSaldo(
+  prestamo: Prestamo,
+  pagos: Pago[],
+  cliente?: Cliente,
+  settings?: BusinessSettings
+): string {
+  const businessName = settings?.business_name || 'Nuestro negocio';
+  const total = pagos.reduce((a, p) => a + p.monto, 0);
+  const mora = pagos.reduce((a, p) => a + (p.monto_mora || 0), 0);
+
+  let msg = `*Préstamo saldado — ${businessName}*\n\n`;
+  msg += `Hola *${cliente?.nombre || 'Cliente'}*,\n`;
+  msg += `Confirmamos que su préstamo quedó saldado por completo.\n\n`;
+  msg += `✅ *Monto recibido:* ${formatCurrency(total)}\n`;
+  msg += `🧾 *Cuotas liquidadas:* ${pagos.length} de ${prestamo.num_cuotas}\n`;
+  if (mora > 0) msg += `⚠️ *Incluye mora:* ${formatCurrency(mora)}\n`;
+  msg += `🟢 *Saldo pendiente:* ${formatCurrency(0)}\n\n`;
+  msg += `Adjuntamos el recibo. ¡Gracias por su confianza!`;
+
+  return msg;
+}
+
 export function generateWhatsappLoanCuotaUrl(
   prestamo: Prestamo,
   cuota: Cuota,

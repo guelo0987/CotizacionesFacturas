@@ -491,3 +491,51 @@ export function simularMora(
 
   return { total: redondearDinero(total), cuotas: aplicables.length };
 }
+
+// =====================================================================
+// Saldar el préstamo de una vez
+// =====================================================================
+
+export interface LineaSaldo {
+  numero: number;
+  cuotaId: string;
+  /** Lo que falta de la cuota: su monto menos lo ya abonado. */
+  restante: number;
+  /** Mora pendiente de la cuota. */
+  mora: number;
+}
+
+export interface ResumenSaldo {
+  lineas: LineaSaldo[];
+  totalCuotas: number;
+  totalMora: number;
+  total: number;
+}
+
+/**
+ * Lo que hay que cobrar para saldar el préstamo hoy.
+ *
+ * Es todo lo que resta: cada cuota pendiente completa, con sus intereses
+ * —también los de las cuotas que aún no han vencido, porque el préstamo se
+ * pactó así—, más la mora acumulada. Si la mora se dejara fuera el
+ * préstamo no quedaría saldado, que es justo lo que el botón promete.
+ *
+ * Reproduce la función `saldar_prestamo` del servidor, que es quien cobra;
+ * aquí sirve para enseñarle al cobrador la cifra antes de confirmar.
+ */
+export function calcularSaldoParaSaldar(prestamo: Prestamo): ResumenSaldo {
+  const lineas = (prestamo.cuotas ?? [])
+    .map((c) => ({
+      numero: c.numero,
+      cuotaId: c.id,
+      restante: redondearDinero(Math.max(0, (c.monto || 0) - (c.monto_pagado || 0))),
+      mora: moraPendiente(c),
+    }))
+    .filter((l) => l.restante > 0 || l.mora > 0)
+    .sort((a, b) => a.numero - b.numero);
+
+  const totalCuotas = redondearDinero(lineas.reduce((s, l) => s + l.restante, 0));
+  const totalMora = redondearDinero(lineas.reduce((s, l) => s + l.mora, 0));
+
+  return { lineas, totalCuotas, totalMora, total: redondearDinero(totalCuotas + totalMora) };
+}

@@ -465,6 +465,32 @@ export const supabaseDataService = {
   },
 
   /**
+   * Salda el préstamo de una vez: todas las cuotas pendientes con sus
+   * intereses, más la mora.
+   *
+   * `montoEsperado` es la cifra que el cobrador vio y confirmó. Si en el
+   * servidor el total ya no coincide —la mora pudo sumar un día— el cobro
+   * se detiene en vez de cobrar un monto distinto del que se vio.
+   */
+  async saldarPrestamo(
+    prestamoId: string,
+    montoEsperado: number,
+    metodo: MetodoPago,
+    referencia?: string
+  ): Promise<Prestamo> {
+    const supabase = requireSupabaseClient();
+    const { data, error } = await supabase.rpc('saldar_prestamo', {
+      p_prestamo_id: prestamoId,
+      p_monto_esperado: montoEsperado,
+      p_metodo: metodo,
+      p_referencia: referencia ?? null,
+    });
+
+    if (error) throw traducir(error, 'saldar el préstamo');
+    return data as Prestamo;
+  },
+
+  /**
    * Habilita, ajusta o quita la mora de un préstamo.
    *
    * Va por su propia vía y no por `guardarPrestamo` porque la mora se

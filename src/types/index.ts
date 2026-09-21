@@ -135,6 +135,12 @@ export interface Pago {
   metodo: MetodoPago;
   /** Parte del pago que se aplicó a la mora; el resto va a la cuota. */
   monto_mora: number;
+  /**
+   * El pago formó parte de un saldo completo del préstamo. Un saldo genera
+   * un pago por cada cuota que quedaba pendiente, y esta marca permite
+   * reunirlos después para reimprimir el recibo de saldo.
+   */
+  saldo_de_prestamo: boolean;
   referencia?: string | null;
   created_at: string;
 }

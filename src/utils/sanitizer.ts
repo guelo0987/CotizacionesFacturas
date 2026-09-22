@@ -104,12 +104,13 @@ export function formatDate(dateString: string | undefined | null): string {
  * el calendario definitivo.
  */
 export function addMonthsToDate(dateString: string, months: number): string {
-  const partes = dateString ? dateString.split('T')[0].split('-') : [];
-  const hoy = new Date();
+  const partesFecha = dateString ? dateString.split('T')[0].split('-') : [];
+  // Sin fecha se parte de hoy, en hora local como el resto de la aplicación
+  const partes = partesFecha.length === 3 ? partesFecha : hoyLocal().split('-');
 
-  const anio = partes.length === 3 ? Number(partes[0]) : hoy.getUTCFullYear();
-  const mes = partes.length === 3 ? Number(partes[1]) : hoy.getUTCMonth() + 1;
-  const dia = partes.length === 3 ? Number(partes[2]) : hoy.getUTCDate();
+  const anio = Number(partes[0]);
+  const mes = Number(partes[1]);
+  const dia = Number(partes[2]);
 
   if (!Number.isFinite(anio) || !Number.isFinite(mes) || !Number.isFinite(dia)) {
     return dateString;
@@ -126,13 +127,10 @@ export function addMonthsToDate(dateString: string, months: number): string {
 
 /** Suma días a una fecha ISO (YYYY-MM-DD) trabajando siempre en UTC. */
 export function addDaysToDate(dateString: string, days: number): string {
-  const parts = dateString ? dateString.split('-') : [];
-  let date: Date;
-  if (parts.length === 3) {
-    date = new Date(Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2])));
-  } else {
-    date = new Date();
-  }
+  const partesFecha = dateString ? dateString.split('-') : [];
+  // Sin fecha se parte de hoy, en hora local como el resto de la aplicación
+  const parts = partesFecha.length === 3 ? partesFecha : hoyLocal().split('-');
+  const date = new Date(Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2])));
   date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().split('T')[0];
 }

@@ -186,9 +186,9 @@ export const LoansView: React.FC<LoansViewProps> = ({
   );
 
   const frecuenciaActual = FRECUENCIAS[frecuenciaSegura(formData.frecuencia)];
-  // Día en UTC a propósito: es el mismo `current_date` con el que el
-  // servidor acumula la mora, y los días que se muestran deben cuadrar.
-  const hoyISO = new Date().toISOString().split('T')[0];
+  // El mismo día de Santo Domingo con el que el servidor acumula la mora
+  // (`hoy_negocio()`): los días que se muestran tienen que cuadrar.
+  const hoyISO = hoyLocal();
 
   const abrirCreacion = React.useCallback(() => {
     setEditandoId(null);
@@ -1168,7 +1168,7 @@ export const LoansView: React.FC<LoansViewProps> = ({
                   const ultimoAbono =
                     (selectedPrestamo.pagos ?? [])
                       .filter((pago) => pago.cuota_id === cuota.id)
-                      .sort((a, b) => (a.fecha < b.fecha ? 1 : -1))[0] ?? null;
+                      .sort((a, b) => Date.parse(b.fecha) - Date.parse(a.fecha))[0] ?? null;
 
                   const moraCuota = moraPendiente(cuota);
                   const { dias: diasMora } = calcularMoraCuota(selectedPrestamo, cuota, hoyISO);

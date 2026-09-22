@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import type {
   AppState,
   Cuota,
@@ -39,7 +39,13 @@ import {
   validarPorcentaje,
 } from '../utils/validacion';
 import { CampoMoneda } from './campos/CampoMoneda';
-import { PrestamoPdfModal, type DocumentoPrestamo } from './PrestamoPdfModal';
+import type { DocumentoPrestamo } from './PrestamoPdfModal';
+
+// Diferido, como la vista previa de facturas: arrastra html2pdf con jsPDF y
+// html2canvas, y no tiene por qué descargarse hasta que se imprime algo.
+const PrestamoPdfModal = lazy(() =>
+  import('./PrestamoPdfModal').then((module) => ({ default: module.PrestamoPdfModal }))
+);
 import { CampoNumero } from './campos/CampoNumero';
 import { useAccionAsync } from '../hooks/useAccionAsync';
 import { generateWhatsappLoanCuotaUrl } from '../utils/whatsapp';
@@ -1513,12 +1519,20 @@ export const LoansView: React.FC<LoansViewProps> = ({
 
       {/* Comprobante del préstamo o recibo de abono */}
       {documentoPdf ? (
-        <PrestamoPdfModal
-          documento={documentoPdf}
-          cliente={state.clientes.find((c) => c.id === documentoPdf.prestamo.cliente_id)}
-          settings={state.settings}
-          onClose={() => setDocumentoPdf(null)}
-        />
+        <Suspense
+          fallback={
+            <div className="fixed inset-0 z-[60] bg-slate-900/60 backdrop-blur-md flex items-center justify-center text-white text-sm font-semibold">
+              Preparando el documento…
+            </div>
+          }
+        >
+          <PrestamoPdfModal
+            documento={documentoPdf}
+            cliente={state.clientes.find((c) => c.id === documentoPdf.prestamo.cliente_id)}
+            settings={state.settings}
+            onClose={() => setDocumentoPdf(null)}
+          />
+        </Suspense>
       ) : null}
 
       {/* Abono a una cuota */}

@@ -448,8 +448,77 @@ era por cuota o único. Ambos indican ahora la modalidad y la frecuencia.
   `vite-plugin-pwa → workbox-build → ejs`. Son dependencias de *build*: no
   viajan en el paquete que recibe el navegador. Resolverlas exige bajar
   `vite-plugin-pwa` a la 1.2.0. No bloquea la entrega.
-- **`PdfModal` pesa 948 KB** (269 KB comprimido) porque arrastra
-  `html2pdf.js` con jsPDF y html2canvas dentro. Ya se carga de forma
-  diferida, así que sólo se descarga al abrir la primera vista previa.
+- **La librería de PDF pesa 948 KB** (270 KB comprimido): `html2pdf.js` con
+  jsPDF y html2canvas dentro. Se carga de forma diferida —tanto la vista
+  previa de facturas como la de préstamos—, así que sólo se descarga al
+  abrir la primera vista previa (ver T6).
 - La aplicación necesita `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` en el
   entorno de despliegue: no hay valores por defecto (ver `DESPLIEGUE.md`).
+
+---
+
+# Tercera ronda — 21 de septiembre de 2026 (prueba completa en producción)
+
+**Alcance:** el flujo completo de un préstamo en producción con un cliente de
+prueba —crear, mora retroactiva, abono con mora, abono parcial, saldar,
+imprimir en A4, 80 mm y 58 mm, PDF, borrar— y la corrección de todo lo que
+apareció. Los datos de prueba se borraron y se comprobó, fila por fila con
+una huella `md5`, que los datos reales quedaron idénticos.
+
+**Estado del build:** `tsc -b` sin errores · `oxlint` sin avisos en `src/` ·
+215 pruebas en verde · `vite build` correcto · historial de migraciones de
+Supabase sincronizado (`supabase db push --dry-run`: al día).
+
+## Corregido en esta ronda
+
+### T1. El servidor decidía «hoy» en UTC
+La base de datos trabaja en UTC y las funciones usaban `current_date`: desde
+las 8 p. m. en RD ya era mañana. Una cuota que vencía ese día aparecía
+atrasada y sumaba un día de mora antes de terminar el día; la mora
+habilitada de noche corría desde el día siguiente; las cotizaciones
+caducaban horas antes, y el 31 de diciembre de noche la numeración saltaba
+al año siguiente. `hoy_negocio()` da el día de Santo Domingo y reemplaza a
+`current_date` en las 9 funciones y en las fechas por defecto de las tablas
+(`20260728001300_hoy_en_santo_domingo.sql`). Probado con el paso de un día
+simulado dentro de una transacción revertida.
+
+### T2. Fechas mostradas en UTC
+Las fechas de pago son `timestamptz` y se cortaban por la «T»: un cobro a las
+9 p. m. salía con la fecha de mañana en recibos y reportes; también el «hoy»
+por defecto de préstamos, cotizaciones, facturas y reportes, y los días de
+mora en pantalla. `diaLocal()` y `hoyLocal()` (`utils/sanitizer.ts`) dan el
+día local.
+
+### T3. Página en blanco en los PDF A4
+El recibo de saldo medía 278 mm contra 277 útiles: el relleno inferior de la
+hoja abría una segunda página vacía, en el PDF y al imprimir. La captura y la
+impresión A4 omiten ahora ese relleno. El recibo de saldo es además más
+compacto: caben 8 cuotas liquidadas en una hoja.
+
+### T4. Filas partidas entre páginas
+html2pdf corta el lienzo por donde caiga: en una factura larga una línea
+quedaba con media letra en cada hoja. Su opción `avoid` mete un `<div>`
+dentro de la tabla que, con los colores `oklch()` de Tailwind, hacía fallar
+la captura entera. `evitarCortes()` (`utils/pdfGenerator.ts`) inserta un
+espaciador válido antes de cada fila o bloque indivisible que cruce un corte,
+con el alto de página exacto con el que corta html2pdf. Probado con
+comprobantes de 12, 20 y 60 cuotas y una factura de 30 líneas.
+
+### T5. Recibos reimpresos con el estado de hoy
+El recibo de la cuota #1 de un préstamo ya saldado decía «saldo RD$0.00,
+préstamo saldado». `estadoTrasPago()` reconstruye cómo quedaron la cuota y el
+préstamo con ese pago. El icono de recibo de una cuota liquidada al saldar
+abre el recibo de saldo, y el aviso al borrar un préstamo dice lo cobrado en
+RD$, mora incluida.
+
+### T6. La librería de PDF viajaba en el paquete principal
+La vista previa de préstamos se importaba de forma directa y arrastraba
+html2pdf al arranque: 1.29 MB (370 KB comprimido). Diferida como la de
+facturas, el paquete inicial queda en 348 KB (104 KB comprimido).
+
+### T7. Historial de migraciones
+Las migraciones se aplicaban a mano y Supabase sólo tenía registrada la
+inicial: un `supabase db push` habría intentado ejecutarlas todas otra vez.
+Tras comprobar en producción que existía cada objeto que crean (22 funciones,
+tablas, columnas, bucket y políticas), se registraron como aplicadas con
+`supabase migration repair`.

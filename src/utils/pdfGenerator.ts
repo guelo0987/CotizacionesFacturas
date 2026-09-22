@@ -71,7 +71,9 @@ function opciones(filename: string, formato: DefinicionFormato, element: HTMLEle
       format: [formato.papelMm, alto] as [number, number],
       orientation: 'portrait' as const,
     },
-    pagebreak: { mode: ['css', 'legacy'] },
+    // Los cortes que no deben partir filas ni bloques los resuelve
+    // `evitarCortes`; html2pdf sólo atiende los saltos explícitos.
+    pagebreak: { mode: ['legacy'] },
   };
 }
 
@@ -95,15 +97,92 @@ async function conColoresNormalizados<T>(
   }
 }
 
+/** Lo que el trabajo de html2pdf deja ver de su estado al encadenarlo. */
+interface EstadoTrabajoPdf {
+  opt: { html2canvas?: { scale?: number } };
+  prop: { container: HTMLElement; pageSize: { inner: { ratio: number } } };
+}
+
+/**
+ * Alto de cada página en píxeles CSS, tal como la corta html2pdf: el lienzo
+ * de html2canvas mide el ancho de la copia, redondeado hacia arriba, por la
+ * escala; cada página es ese ancho por la proporción de la hoja.
+ */
+function altoDePagina(trabajo: EstadoTrabajoPdf): number {
+  const escala = Number(trabajo.opt.html2canvas?.scale) || 1;
+  const ancho = Math.ceil(trabajo.prop.container.getBoundingClientRect().width);
+  return Math.floor(Math.floor(ancho * escala) * trabajo.prop.pageSize.inner.ratio) / escala;
+}
+
+/**
+ * Empuja a la página siguiente lo que quedaría partido por un corte.
+ *
+ * html2pdf rebana el lienzo cada tantos píxeles, caiga donde caiga: en una
+ * factura larga una línea quedaba con media letra en cada hoja. Su opción
+ * `avoid` lo arreglaría, pero mete un `<div>` dentro de la tabla y
+ * html2canvas se cuelga con él. Aquí se recorre la copia en orden y, antes
+ * de cada fila o bloque indivisible que cruce un corte, se inserta un
+ * espaciador válido: una fila vacía en las tablas, un bloque en lo demás.
+ */
+function evitarCortes(contenedor: HTMLElement, altoPagina: number): void {
+  if (!(altoPagina > 0)) return;
+  const origen = contenedor.getBoundingClientRect().top;
+  const indivisibles = Array.from(contenedor.querySelectorAll<HTMLElement>('*')).filter(
+    (el) => el.matches('tbody > tr') || getComputedStyle(el).breakInside === 'avoid'
+  );
+
+  for (const el of indivisibles) {
+    // Se mide en cada vuelta: cada espaciador desplaza lo que viene detrás
+    const caja = el.getBoundingClientRect();
+    if (caja.height === 0 || caja.height >= altoPagina) continue;
+    const arriba = caja.top - origen;
+    const pagina = Math.floor(arriba / altoPagina);
+    if (caja.bottom - origen <= (pagina + 1) * altoPagina) continue;
+
+    const nuevo = espaciador(el, Math.ceil((pagina + 1) * altoPagina - arriba) + 2);
+    el.before(nuevo);
+    // Nace después de traducir los colores de la hoja: hereda de la tabla
+    // bordes en `oklch()` que html2canvas no sabe leer y harían fallar
+    // la captura entera.
+    normalizarColoresParaCaptura(nuevo);
+  }
+}
+
+function espaciador(antesDe: HTMLElement, alto: number): HTMLElement {
+  if (antesDe instanceof HTMLTableRowElement) {
+    const fila = document.createElement('tr');
+    const celda = fila.insertCell();
+    celda.colSpan = Array.from(antesDe.cells).reduce((suma, c) => suma + c.colSpan, 0) || 1;
+    celda.style.cssText = `height:${alto}px;padding:0;border:0`;
+    return fila;
+  }
+  const bloque = document.createElement('div');
+  bloque.style.height = `${alto}px`;
+  return bloque;
+}
+
+/**
+ * El trabajo de html2pdf con la copia ya preparada y sus cortes ajustados.
+ * html2pdf encadena como una promesa que comparte su estado: se prepara la
+ * copia, se corrigen los cortes y la captura parte de ahí.
+ */
+function trabajoPdf(element: HTMLElement, filename: string, formato: FormatoImpresion) {
+  const trabajo = html2pdf()
+    .set(opciones(filename, FORMATOS[formato], element))
+    .from(element)
+    .toContainer();
+  return trabajo.then(function (this: EstadoTrabajoPdf) {
+    evitarCortes(this.prop.container, altoDePagina(this));
+  }) as unknown as typeof trabajo;
+}
+
 export async function generatePdfFromElement(
   elementId: string,
   filename: string,
   formato: FormatoImpresion = 'a4'
 ): Promise<void> {
   const element = elementoODescartar(elementId, 'exportar');
-  await conColoresNormalizados(element, () =>
-    html2pdf().set(opciones(filename, FORMATOS[formato], element)).from(element).save()
-  );
+  await conColoresNormalizados(element, () => trabajoPdf(element, filename, formato).save());
 }
 
 /** El mismo PDF de la descarga, en memoria, para poder compartirlo. */
@@ -114,7 +193,7 @@ export async function generarPdfBlob(
 ): Promise<Blob> {
   const element = elementoODescartar(elementId, 'exportar');
   const salida = await conColoresNormalizados(element, () =>
-    html2pdf().set(opciones(filename, FORMATOS[formato], element)).from(element).outputPdf('blob')
+    trabajoPdf(element, filename, formato).outputPdf('blob')
   );
   return salida instanceof Blob ? salida : new Blob([salida], { type: 'application/pdf' });
 }

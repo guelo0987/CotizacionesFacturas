@@ -3,7 +3,14 @@ export type UnidadServicio = 'hora' | 'unidad' | 'm²' | 'servicio';
 
 export type EstadoCotizacion = 'borrador' | 'enviada' | 'aceptada' | 'rechazada' | 'vencida';
 export type EstadoFactura = 'pendiente' | 'parcial' | 'pagada' | 'anulada';
-export type MetodoPago = 'efectivo' | 'transferencia' | 'tarjeta' | 'otro';
+/** Cómo entrega el dinero el cliente: lo que se elige al cobrar. */
+export type MetodoCobro = 'efectivo' | 'transferencia' | 'tarjeta' | 'otro';
+
+/**
+ * Método guardado en un pago. `saldo_a_favor` lo pone el servidor cuando
+ * todo se pagó con el saldo del cliente, sin efectivo.
+ */
+export type MetodoPago = MetodoCobro | 'saldo_a_favor';
 
 export type FrecuenciaPrestamo =
   | 'diario'
@@ -141,8 +148,42 @@ export interface Pago {
    * reunirlos después para reimprimir el recibo de saldo.
    */
   saldo_de_prestamo: boolean;
+  /**
+   * `monto` es el dinero que entró en esta operación. `credito_usado` es lo
+   * que se pagó con saldo a favor y `excedente` la parte del dinero que
+   * sobró y quedó a favor del cliente:
+   *   aplicado a la deuda = monto + credito_usado − excedente
+   */
+  credito_usado: number;
+  excedente: number;
   referencia?: string | null;
   created_at: string;
+}
+
+/**
+ * Un renglón del libro de saldo a favor de un cliente. Lo que entra suma
+ * (excedente, anticipo) y lo que sale resta (uso, devolución); la anulación
+ * revierte lo de un préstamo o factura que se borró.
+ */
+export type TipoMovimientoCredito = 'excedente' | 'anticipo' | 'uso' | 'devolucion' | 'anulacion';
+
+export interface MovimientoCredito {
+  id: string;
+  organizacion_id: string;
+  cliente_id: string;
+  tipo: TipoMovimientoCredito;
+  monto: number;
+  pago_id: string | null;
+  prestamo_id: string | null;
+  factura_id: string | null;
+  cuota_id: string | null;
+  /** Referencia legible del documento de origen (PRE-…, FAC-…). */
+  documento: string | null;
+  metodo: MetodoPago | null;
+  referencia: string | null;
+  nota: string | null;
+  fecha: string;
+  creado_por: string | null;
 }
 
 export interface Cuota {
@@ -225,6 +266,7 @@ export interface AppState {
   facturas: Factura[];
   prestamos: Prestamo[];
   pagos: Pago[];
+  movimientosCredito: MovimientoCredito[];
 }
 
 export type TabType = 'inicio' | 'clientes' | 'documentos' | 'prestamos';

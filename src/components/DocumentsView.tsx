@@ -23,6 +23,7 @@ import {
   validarEntero,
 } from '../utils/validacion';
 import { CampoMoneda } from './campos/CampoMoneda';
+import { creditoSugerido, repartirCobro, saldoCliente } from '../utils/creditos';
 import { CampoNumero } from './campos/CampoNumero';
 import { useAccionAsync } from '../hooks/useAccionAsync';
 import {
@@ -74,6 +75,7 @@ interface DocumentsViewProps {
     monto: number;
     metodo: MetodoPago;
     referencia?: string;
+    credito?: number;
   }) => Promise<void>;
   onOpenPdfPreview: (type: 'cotizacion' | 'factura', doc: Cotizacion | Factura) => void;
 }
@@ -126,6 +128,8 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
   const [pagoMetodo, setPagoMetodo] = useState<MetodoPago>('efectivo');
   const [pagoRef, setPagoRef] = useState('');
   const [errorPago, setErrorPago] = useState('');
+  // Saldo a favor que el cobrador decide usar en el pago
+  const [pagoCredito, setPagoCredito] = useState<number | null>(null);
 
   const { ejecutando, ejecutar } = useAccionAsync();
 
@@ -351,36 +355,59 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
     setPagoMetodo('efectivo');
     setPagoRef('');
     setErrorPago('');
+    setPagoCredito(null);
   };
+
+  /**
+   * Reparto del pago: «Monto a abonar» es lo que se paga; lo que pase del
+   * saldo pendiente queda a favor del cliente, y el saldo usado se descuenta
+   * del efectivo que entrega.
+   */
+  const repartoPago = (() => {
+    if (!pagoFactura) return null;
+    const monto = redondearDinero(pagoMonto ?? 0);
+    const credito = redondearDinero(pagoCredito ?? 0);
+    const saldoDisponible = pagoFactura.cliente_id
+      ? saldoCliente(state.movimientosCredito, pagoFactura.cliente_id)
+      : 0;
+    const reparto = repartirCobro({
+      efectivo: redondearDinero(monto - credito),
+      credito,
+      deuda: pagoFactura.saldo_pendiente,
+      saldoDisponible,
+    });
+    return {
+      monto,
+      saldoDisponible,
+      ...reparto,
+      error:
+        reparto.error ??
+        (reparto.excedente > 0 && !pagoFactura.cliente_id
+          ? 'La factura no tiene cliente: no se puede guardar el excedente a su favor.'
+          : null),
+    };
+  })();
 
   const handleConfirmarPago = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!pagoFactura) return;
+    if (!pagoFactura || !repartoPago) return;
 
-    const monto = pagoMonto;
-    if (monto === null) {
+    if (pagoMonto === null) {
       setErrorPago('Escribe un monto válido.');
       return;
     }
-    if (monto <= 0) {
-      setErrorPago('El monto debe ser mayor que cero.');
-      return;
-    }
-    // El sobrepago se rechaza en vez de recortarse en silencio, que era lo
-    // que hacía desaparecer el excedente sin dejar rastro.
-    if (redondearDinero(monto) > pagoFactura.saldo_pendiente) {
-      setErrorPago(
-        `El monto supera el saldo pendiente (${formatCurrency(pagoFactura.saldo_pendiente)}).`
-      );
+    if (repartoPago.error) {
+      setErrorPago(repartoPago.error);
       return;
     }
 
     const ok = await ejecutar(() =>
       onRegistrarPago({
         factura_id: pagoFactura.id,
-        monto: redondearDinero(monto),
+        monto: repartoPago.efectivo,
         metodo: pagoMetodo,
         referencia: limpiarTexto(pagoRef, 120) || undefined,
+        credito: repartoPago.credito,
       })
     );
 
@@ -1101,7 +1128,71 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
                 >
                   Abonar el saldo completo
                 </button>
+                <p className="text-xs text-slate-500">
+                  Si entrega de más, el resto queda como saldo a favor del cliente.
+                </p>
               </div>
+
+              {repartoPago && repartoPago.saldoDisponible > 0 ? (
+                <div className="bg-sky-50 border border-sky-200 rounded-xl p-3 space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <label htmlFor="pago-credito" className="text-sm font-semibold text-sky-900">
+                      Usar de su saldo a favor
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        // El saldo es para cubrir la deuda: si se escribió de
+                        // más, el monto se ajusta al saldo pendiente
+                        const monto = Math.min(
+                          repartoPago.monto || pagoFactura.saldo_pendiente,
+                          pagoFactura.saldo_pendiente
+                        );
+                        setPagoMonto(monto);
+                        setPagoCredito(creditoSugerido(repartoPago.saldoDisponible, monto));
+                        setErrorPago('');
+                      }}
+                      className="text-xs font-bold text-sky-800 bg-white border border-sky-200 hover:bg-sky-100 rounded-lg px-2 py-1"
+                    >
+                      Usar lo justo
+                    </button>
+                  </div>
+                  <CampoMoneda
+                    id="pago-credito"
+                    value={pagoCredito}
+                    onChange={(monto) => {
+                      setPagoCredito(monto);
+                      setErrorPago('');
+                    }}
+                  />
+                  <p className="text-[11px] text-sky-900/70">
+                    Disponible: {formatCurrency(repartoPago.saldoDisponible)}
+                  </p>
+                </div>
+              ) : null}
+
+              {repartoPago ? (
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 text-sm space-y-1">
+                  {repartoPago.credito > 0 ? (
+                    <div className="flex justify-between text-sky-900">
+                      <span>Con su saldo a favor:</span>
+                      <span className="font-semibold">−{formatCurrency(repartoPago.credito)}</span>
+                    </div>
+                  ) : null}
+                  {repartoPago.excedente > 0 ? (
+                    <div className="flex justify-between text-sky-900">
+                      <span>Queda a su favor:</span>
+                      <span className="font-semibold">{formatCurrency(repartoPago.excedente)}</span>
+                    </div>
+                  ) : null}
+                  <div className="flex justify-between items-center">
+                    <span className="font-semibold text-emerald-900">Efectivo que recibes:</span>
+                    <span className="font-black text-emerald-700">
+                      {formatCurrency(Math.max(0, repartoPago.efectivo))}
+                    </span>
+                  </div>
+                </div>
+              ) : null}
 
               <div>
                 <label htmlFor="pago-metodo" className="block text-sm font-semibold text-slate-700 mb-1">

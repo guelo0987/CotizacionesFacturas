@@ -1,6 +1,7 @@
 import type { Cuota, Pago, Prestamo } from '../types';
 import { FRECUENCIAS, frecuenciaSegura, modalidadSegura } from './calculos';
 import { redondearDinero } from './validacion';
+import { aCuotaDePago } from './creditos';
 
 /**
  * Datos derivados que necesitan el comprobante de préstamo y el recibo de
@@ -84,7 +85,8 @@ export function estadoTrasPago(prestamo: Prestamo, cuota: Cuota, pago: Pago): Es
   const limite = instante(pago);
   // Los pagos de una misma operación —un saldo— comparten instante: van juntos
   const hasta = pagos.filter((p) => instante(p) <= limite);
-  const aLaCuota = (p: Pago) => (p.monto || 0) - (p.monto_mora || 0);
+  // El saldo a favor usado cuenta como abono; el excedente, no
+  const aLaCuota = (p: Pago) => aCuotaDePago(p);
 
   return resultado(
     hasta.filter((p) => p.cuota_id === cuota.id).reduce((s, p) => s + aLaCuota(p), 0),
@@ -98,4 +100,5 @@ export const METODOS_PAGO: Record<string, string> = {
   transferencia: 'Transferencia bancaria',
   tarjeta: 'Tarjeta',
   otro: 'Otro',
+  saldo_a_favor: 'Saldo a favor',
 };

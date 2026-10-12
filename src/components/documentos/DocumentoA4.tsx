@@ -3,6 +3,8 @@ import type { Cotizacion, Factura, Cliente, BusinessSettings } from '../../types
 import { formatCurrency, formatDate, formatDocumento, formatTelefono } from '../../utils/sanitizer';
 import { describirNCF } from '../../utils/validacion';
 import { DatosNegocioA4, PieDocumentoA4, TituloDocumentoA4 } from './piezas';
+import { aplicadoDePago, notaCreditoPago } from '../../utils/creditos';
+import { METODOS_PAGO } from '../../utils/documentosPrestamo';
 
 interface DocumentoProps {
   id: string;
@@ -162,15 +164,22 @@ export const DocumentoA4: React.FC<DocumentoProps> = ({ id, type, doc, cliente, 
             Pagos recibidos
           </div>
           <div className="space-y-1">
-            {invoice.pagos!.map((pago) => (
-              <div key={pago.id} className="flex justify-between text-xs text-slate-700">
-                <span>
-                  {formatDate(pago.fecha)} · {pago.metodo}
-                  {pago.referencia ? ` · ${pago.referencia}` : ''}
-                </span>
-                <span className="font-semibold">{formatCurrency(pago.monto)}</span>
-              </div>
-            ))}
+            {invoice.pagos!.map((pago) => {
+              const nota = notaCreditoPago(pago);
+              return (
+                <div key={pago.id} className="text-xs text-slate-700">
+                  <div className="flex justify-between">
+                    <span>
+                      {formatDate(pago.fecha)} · {METODOS_PAGO[pago.metodo] ?? pago.metodo}
+                      {pago.referencia ? ` · ${pago.referencia}` : ''}
+                    </span>
+                    {/* Lo que se abonó a la factura, no el efectivo: con saldo a favor difieren */}
+                    <span className="font-semibold">{formatCurrency(aplicadoDePago(pago))}</span>
+                  </div>
+                  {nota ? <div className="text-[10px] text-slate-500 text-right">{nota}</div> : null}
+                </div>
+              );
+            })}
           </div>
         </div>
       ) : null}

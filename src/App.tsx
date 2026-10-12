@@ -7,8 +7,11 @@ import type {
   Cotizacion,
   Factura,
   LineaDocumento,
+  MetodoCobro,
   MetodoPago,
   ModoMora,
+  MovimientoCredito,
+  Pago,
   Prestamo,
   Servicio,
   TabType,
@@ -43,6 +46,11 @@ export interface SolicitudApertura {
 }
 
 type EstadoSesion = 'cargando' | 'anonimo' | 'sin-organizacion' | 'listo';
+
+/** El pago más reciente de una lista, por instante. */
+function ultimoPago(pagos: Pago[] | undefined): Pago | undefined {
+  return [...(pagos ?? [])].sort((a, b) => Date.parse(b.fecha) - Date.parse(a.fecha))[0];
+}
 
 export function App() {
   const { exito, error: avisarError, confirmar } = useFeedback();
@@ -132,16 +140,25 @@ export function App() {
         // Sin esto el contador de atrasos del panel se quedaba siempre en cero.
         await supabaseDataService.actualizarAtrasos();
 
-        const [config, clientes, servicios, cotizaciones, facturas, prestamos, pagos] =
-          await Promise.all([
-            supabaseDataService.fetchConfiguracion(),
-            supabaseDataService.fetchClientes(),
-            supabaseDataService.fetchServicios(),
-            supabaseDataService.fetchCotizaciones(),
-            supabaseDataService.fetchFacturas(),
-            supabaseDataService.fetchPrestamos(),
-            supabaseDataService.fetchPagos(),
-          ]);
+        const [
+          config,
+          clientes,
+          servicios,
+          cotizaciones,
+          facturas,
+          prestamos,
+          pagos,
+          movimientosCredito,
+        ] = await Promise.all([
+          supabaseDataService.fetchConfiguracion(),
+          supabaseDataService.fetchClientes(),
+          supabaseDataService.fetchServicios(),
+          supabaseDataService.fetchCotizaciones(),
+          supabaseDataService.fetchFacturas(),
+          supabaseDataService.fetchPrestamos(),
+          supabaseDataService.fetchPagos(),
+          supabaseDataService.fetchMovimientosCredito(),
+        ]);
 
         // Se confía en lo que devuelve el servidor. El patrón anterior
         // (`datos.length > 0 ? datos : anterior`) resucitaba registros ya
@@ -154,6 +171,7 @@ export function App() {
           facturas,
           prestamos,
           pagos,
+          movimientosCredito,
         }));
       } catch (e) {
         avisarError(mensajeDeError(e));
@@ -179,6 +197,33 @@ export function App() {
     if (estadoSesion !== 'listo' || !sesion?.user) return;
     guardarCache(sesion.user.id, state);
   }, [state, estadoSesion, sesion]);
+
+  /**
+   * Vuelve a leer el libro de saldo a favor de un cliente tras una operación
+   * que pudo tocarlo: un cobro con excedente o con saldo usado, o el borrado
+   * de un documento, que anula sus movimientos.
+   */
+  const refrescarCredito = useCallback(async (clienteId: string | null | undefined) => {
+    if (!clienteId) return;
+    try {
+      const propios = await supabaseDataService.fetchMovimientosCredito(clienteId);
+      setState((prev) => ({
+        ...prev,
+        movimientosCredito: [
+          ...prev.movimientosCredito.filter((m) => m.cliente_id !== clienteId),
+          ...propios,
+        ],
+      }));
+    } catch (e) {
+      avisarError(mensajeDeError(e));
+    }
+  }, [avisarError]);
+
+  /** Si un préstamo o una factura tiene movimientos de saldo a favor. */
+  const tocaCredito = ({ prestamoId, facturaId }: { prestamoId?: string; facturaId?: string }) =>
+    state.movimientosCredito.some(
+      (m) => (prestamoId && m.prestamo_id === prestamoId) || (facturaId && m.factura_id === facturaId)
+    );
 
   const clienteMap = useMemo(() => {
     const map = new Map<string, Cliente>();
@@ -243,7 +288,18 @@ export function App() {
   const handleDeleteCliente = async (id: string) => {
     const cliente = clienteMap.get(id);
     const historial = await supabaseDataService.contarHistorialCliente(id);
-    const total = historial.cotizaciones + historial.facturas + historial.prestamos;
+
+    // Ese dinero es del cliente: primero se usa o se le devuelve
+    if (historial.saldo_a_favor !== 0) {
+      avisarError(
+        `${cliente?.nombre ?? 'El cliente'} tiene ${formatCurrency(historial.saldo_a_favor)} de saldo a favor. ` +
+          'Úsalo en una deuda o devuélveselo desde su ficha antes de eliminarlo.'
+      );
+      return;
+    }
+
+    const total =
+      historial.cotizaciones + historial.facturas + historial.prestamos + historial.movimientos_credito;
 
     const confirmado = await confirmar({
       titulo: total > 0 ? 'Este cliente tiene historial' : 'Eliminar cliente',
@@ -253,7 +309,10 @@ export function App() {
           : `¿Eliminar a ${cliente?.nombre ?? 'este cliente'}? Esta acción no se puede deshacer.`,
       detalle:
         total > 0
-          ? `Documentos vinculados:\n· ${historial.cotizaciones} cotizaciones\n· ${historial.facturas} facturas\n· ${historial.prestamos} préstamos`
+          ? `Documentos vinculados:\n· ${historial.cotizaciones} cotizaciones\n· ${historial.facturas} facturas\n· ${historial.prestamos} préstamos` +
+            (historial.movimientos_credito > 0
+              ? `\n· ${historial.movimientos_credito} movimientos de saldo a favor`
+              : '')
           : undefined,
       textoConfirmar: total > 0 ? 'Desactivar' : 'Eliminar',
       peligroso: true,
@@ -391,7 +450,10 @@ export function App() {
       mensaje: `¿Eliminar la factura ${fac.numero}?`,
       detalle:
         fac.monto_pagado > 0
-          ? 'Atención: esta factura tiene pagos registrados. Al eliminarla se borra también el registro de esos cobros.'
+          ? 'Atención: esta factura tiene pagos registrados. Al eliminarla se borra también el registro de esos cobros.' +
+            (tocaCredito({ facturaId: fac.id })
+              ? ' El saldo a favor que se usó en ella vuelve al cliente y el que generó se anula.'
+              : '')
           : undefined,
       textoConfirmar: 'Eliminar',
       peligroso: true,
@@ -404,6 +466,7 @@ export function App() {
       facturas: prev.facturas.filter((f) => f.id !== fac.id),
       pagos: prev.pagos.filter((p) => p.factura_id !== fac.id),
     }));
+    await refrescarCredito(fac.cliente_id);
     exito('Factura eliminada.');
   };
 
@@ -412,12 +475,14 @@ export function App() {
     monto: number;
     metodo: MetodoPago;
     referencia?: string;
+    credito?: number;
   }) => {
     const actualizada = await supabaseDataService.registrarPagoFactura(
       datos.factura_id,
       datos.monto,
       datos.metodo,
-      datos.referencia
+      datos.referencia,
+      datos.credito ?? 0
     );
 
     setState((prev) => ({
@@ -425,11 +490,14 @@ export function App() {
       facturas: prev.facturas.map((f) => (f.id === actualizada.id ? actualizada : f)),
       pagos: [...(actualizada.pagos ?? []), ...prev.pagos.filter((p) => p.factura_id !== actualizada.id)],
     }));
+    await refrescarCredito(actualizada.cliente_id);
 
+    const excedente = ultimoPago(actualizada.pagos)?.excedente ?? 0;
     exito(
-      actualizada.saldo_pendiente <= 0
+      (actualizada.saldo_pendiente <= 0
         ? `Factura ${actualizada.numero} saldada por completo.`
-        : `Pago registrado. Queda pendiente ${actualizada.saldo_pendiente.toFixed(2)}.`
+        : `Pago registrado. Queda pendiente ${formatCurrency(actualizada.saldo_pendiente)}.`) +
+        (excedente > 0 ? ` Quedan ${formatCurrency(excedente)} a favor del cliente.` : '')
     );
   };
 
@@ -477,13 +545,17 @@ export function App() {
     prestamoId: string,
     montoEsperado: number,
     metodo: MetodoPago,
-    referencia?: string
+    referencia?: string,
+    recibido?: number,
+    credito = 0
   ): Promise<Prestamo> => {
     const saldado = await supabaseDataService.saldarPrestamo(
       prestamoId,
       montoEsperado,
       metodo,
-      referencia
+      referencia,
+      recibido,
+      credito
     );
     setState((prev) => ({
       ...prev,
@@ -493,7 +565,16 @@ export function App() {
         ...(saldado.pagos ?? []),
       ],
     }));
-    exito(`Préstamo saldado: se cobraron ${formatCurrency(montoEsperado)}.`);
+    await refrescarCredito(saldado.cliente_id);
+
+    const excedente = (saldado.pagos ?? [])
+      .filter((p) => p.saldo_de_prestamo)
+      .reduce((suma, p) => suma + (Number(p.excedente) || 0), 0);
+    exito(
+      `Préstamo saldado por ${formatCurrency(montoEsperado)}.` +
+        (credito > 0 ? ` Se usaron ${formatCurrency(credito)} de su saldo a favor.` : '') +
+        (excedente > 0 ? ` Quedan ${formatCurrency(excedente)} a favor del cliente.` : '')
+    );
     return saldado;
   };
 
@@ -527,14 +608,16 @@ export function App() {
     monto: number,
     metodo: MetodoPago,
     referencia?: string,
-    montoMora = 0
+    montoMora = 0,
+    credito = 0
   ) => {
     const actualizado = await supabaseDataService.registrarPagoCuota(
       cuotaId,
       monto,
       metodo,
       referencia,
-      montoMora
+      montoMora,
+      credito
     );
 
     setState((prev) => ({
@@ -545,12 +628,58 @@ export function App() {
         ...prev.pagos.filter((p) => p.prestamo_id !== actualizado.id),
       ],
     }));
+    await refrescarCredito(actualizado.cliente_id);
 
+    const excedente =
+      ultimoPago((actualizado.pagos ?? []).filter((p) => p.cuota_id === cuotaId))?.excedente ?? 0;
     exito(
-      actualizado.estado === 'saldado'
+      (actualizado.estado === 'saldado'
         ? '¡Préstamo saldado por completo!'
-        : 'Abono registrado correctamente.'
+        : 'Abono registrado correctamente.') +
+        (excedente > 0 ? ` Quedan ${formatCurrency(excedente)} a favor del cliente.` : '')
     );
+  };
+
+  // -------------------------------------------------------------------
+  // Saldo a favor
+  // -------------------------------------------------------------------
+  /** Devuelve el movimiento creado, para abrir su comprobante enseguida. */
+  const handleRegistrarAnticipo = async (
+    clienteId: string,
+    monto: number,
+    metodo: MetodoCobro,
+    referencia?: string,
+    nota?: string
+  ): Promise<MovimientoCredito> => {
+    const movimiento = await supabaseDataService.registrarAnticipo(
+      clienteId,
+      monto,
+      metodo,
+      referencia,
+      nota
+    );
+    setState((prev) => ({ ...prev, movimientosCredito: [...prev.movimientosCredito, movimiento] }));
+    exito(`Anticipo de ${formatCurrency(monto)} registrado a favor del cliente.`);
+    return movimiento;
+  };
+
+  const handleDevolverSaldo = async (
+    clienteId: string,
+    monto: number,
+    metodo: MetodoCobro,
+    referencia?: string,
+    nota?: string
+  ): Promise<MovimientoCredito> => {
+    const movimiento = await supabaseDataService.devolverSaldo(
+      clienteId,
+      monto,
+      metodo,
+      referencia,
+      nota
+    );
+    setState((prev) => ({ ...prev, movimientosCredito: [...prev.movimientosCredito, movimiento] }));
+    exito(`Se devolvieron ${formatCurrency(monto)} del saldo a favor.`);
+    return movimiento;
   };
 
   const handleDeletePrestamo = async (prestamo: Prestamo) => {
@@ -564,7 +693,10 @@ export function App() {
       mensaje: '¿Eliminar este préstamo junto con su calendario de cuotas?',
       detalle:
         pagado > 0
-          ? `Atención: ya se cobraron ${formatCurrency(pagado)} de este préstamo. Al eliminarlo se pierde el registro de esos pagos.`
+          ? `Atención: ya se cobraron ${formatCurrency(pagado)} de este préstamo. Al eliminarlo se pierde el registro de esos pagos.` +
+            (tocaCredito({ prestamoId: prestamo.id })
+              ? ' El saldo a favor que se usó en él vuelve al cliente y el que generó se anula.'
+              : '')
           : undefined,
       textoConfirmar: 'Eliminar',
       peligroso: true,
@@ -577,6 +709,7 @@ export function App() {
       prestamos: prev.prestamos.filter((p) => p.id !== prestamo.id),
       pagos: prev.pagos.filter((p) => p.prestamo_id !== prestamo.id),
     }));
+    await refrescarCredito(prestamo.cliente_id);
     exito('Préstamo eliminado.');
   };
 
@@ -675,6 +808,8 @@ export function App() {
             onAddCliente={handleAddCliente}
             onUpdateCliente={handleUpdateCliente}
             onDeleteCliente={handleDeleteCliente}
+            onRegistrarAnticipo={handleRegistrarAnticipo}
+            onDevolverSaldo={handleDevolverSaldo}
           />
         ) : null}
 

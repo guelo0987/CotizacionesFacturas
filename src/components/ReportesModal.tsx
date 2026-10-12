@@ -5,6 +5,8 @@ import { formatearDocumento, formatearTelefono, redondearDinero } from '../utils
 import { descargarCSV, generarCSV, nombreConFecha } from '../utils/exportar';
 import { MODALIDADES, modalidadSegura } from '../utils/calculos';
 import { useFeedback } from './feedback/contexto';
+import { TIPOS_MOVIMIENTO, aplicadoDePago, libroCliente, saldosPorCliente } from '../utils/creditos';
+import { METODOS_PAGO } from '../utils/documentosPrestamo';
 import { Download, FileSpreadsheet, X } from 'lucide-react';
 
 interface ReportesModalProps {
@@ -51,6 +53,20 @@ export const ReportesModal: React.FC<ReportesModalProps> = ({ state, onClose }) 
       pagos.filter((p) => p.prestamo_id).reduce((a, p) => a + p.monto, 0)
     );
 
+    // Saldo a favor: lo que entró y salió en el período, y lo que el negocio
+    // les debe hoy a sus clientes
+    const movimientos = state.movimientosCredito.filter((m) => dentroDelRango(m.fecha, desde, hasta));
+    const sumaTipo = (...tipos: string[]) =>
+      redondearDinero(
+        movimientos.filter((m) => tipos.includes(m.tipo)).reduce((a, m) => a + Number(m.monto), 0)
+      );
+    const anticipos = sumaTipo('anticipo');
+    const devoluciones = Math.abs(sumaTipo('devolucion'));
+    const saldoGenerado = sumaTipo('excedente', 'anticipo');
+    const saldoUsado = Math.abs(sumaTipo('uso'));
+    const saldosClientes = saldosPorCliente(state.movimientosCredito);
+    const saldoVigente = redondearDinero([...saldosClientes.values()].reduce((a, v) => a + v, 0));
+
     return {
       facturas,
       cotizaciones,
@@ -61,10 +77,18 @@ export const ReportesModal: React.FC<ReportesModalProps> = ({ state, onClose }) 
       cobradoFacturas,
       cobradoPrestamos,
       porCobrar,
+      movimientos,
+      anticipos,
+      devoluciones,
+      netoCaja: redondearDinero(cobrado + anticipos - devoluciones),
+      saldoGenerado,
+      saldoUsado,
+      saldosClientes,
+      saldoVigente,
     };
   }, [state, desde, hasta]);
 
-  const exportar = (tipo: 'facturas' | 'pagos' | 'clientes' | 'prestamos' | 'itbis') => {
+  const exportar = (tipo: 'facturas' | 'pagos' | 'clientes' | 'prestamos' | 'itbis' | 'saldo') => {
     try {
       let csv = '';
       let nombre = '';
@@ -89,7 +113,10 @@ export const ReportesModal: React.FC<ReportesModalProps> = ({ state, onClose }) 
       } else if (tipo === 'pagos') {
         nombre = 'pagos_recibidos';
         csv = generarCSV(
-          ['Fecha', 'Origen', 'Documento', 'Cliente', 'Método', 'Referencia', 'Monto'],
+          [
+            'Fecha', 'Origen', 'Documento', 'Cliente', 'Método', 'Referencia',
+            'Dinero recibido', 'Saldo a favor usado', 'Excedente a favor', 'Aplicado a la deuda',
+          ],
           datos.pagos.map((p) => {
             const factura = state.facturas.find((f) => f.id === p.factura_id);
             const prestamo = state.prestamos.find((pr) => pr.id === p.prestamo_id);
@@ -98,16 +125,19 @@ export const ReportesModal: React.FC<ReportesModalProps> = ({ state, onClose }) 
               p.factura_id ? 'Factura' : 'Préstamo',
               factura?.numero ?? (prestamo ? `Préstamo ${formatCurrency(prestamo.monto_prestado)}` : ''),
               nombreCliente(factura?.cliente_id ?? prestamo?.cliente_id ?? ''),
-              p.metodo,
+              METODOS_PAGO[p.metodo] ?? p.metodo,
               p.referencia ?? '',
               p.monto,
+              Number(p.credito_usado) || 0,
+              Number(p.excedente) || 0,
+              aplicadoDePago(p),
             ];
           })
         );
       } else if (tipo === 'clientes') {
         nombre = 'clientes';
         csv = generarCSV(
-          ['Nombre', 'RNC/Cédula', 'Teléfono', 'Correo', 'Dirección', 'Estado', 'Deuda pendiente'],
+          ['Nombre', 'RNC/Cédula', 'Teléfono', 'Correo', 'Dirección', 'Estado', 'Deuda pendiente', 'Saldo a favor'],
           state.clientes.map((c) => [
             c.nombre,
             formatearDocumento(c.documento),
@@ -120,6 +150,7 @@ export const ReportesModal: React.FC<ReportesModalProps> = ({ state, onClose }) 
                 .filter((f) => f.cliente_id === c.id)
                 .reduce((a, f) => a + (f.saldo_pendiente || 0), 0)
             ),
+            datos.saldosClientes.get(c.id) ?? 0,
           ])
         );
       } else if (tipo === 'prestamos') {
@@ -153,6 +184,27 @@ export const ReportesModal: React.FC<ReportesModalProps> = ({ state, onClose }) 
             ];
           })
         );
+      } else if (tipo === 'saldo') {
+        nombre = 'saldo_a_favor';
+        // El saldo de cada renglón es el del cliente tras ese movimiento
+        const saldoTras = new Map<string, number>();
+        for (const c of new Set(datos.movimientos.map((m) => m.cliente_id))) {
+          for (const r of libroCliente(state.movimientosCredito, c)) saldoTras.set(r.id, r.saldo);
+        }
+        csv = generarCSV(
+          ['Fecha', 'Cliente', 'Movimiento', 'Documento', 'Método', 'Referencia', 'Nota', 'Monto', 'Saldo del cliente'],
+          datos.movimientos.map((m) => [
+            formatDate(m.fecha),
+            nombreCliente(m.cliente_id),
+            TIPOS_MOVIMIENTO[m.tipo],
+            m.documento ?? '',
+            m.metodo ? METODOS_PAGO[m.metodo] ?? m.metodo : '',
+            m.referencia ?? '',
+            m.nota ?? '',
+            Number(m.monto),
+            saldoTras.get(m.id) ?? '',
+          ])
+        );
       } else {
         // Resumen de ITBIS facturado, base para el reporte 607 de la DGII
         nombre = 'itbis_ventas';
@@ -182,6 +234,11 @@ export const ReportesModal: React.FC<ReportesModalProps> = ({ state, onClose }) 
   const botones: { id: Parameters<typeof exportar>[0]; etiqueta: string; detalle: string }[] = [
     { id: 'facturas', etiqueta: 'Facturas del período', detalle: `${datos.facturas.length} documentos` },
     { id: 'pagos', etiqueta: 'Pagos recibidos', detalle: `${datos.pagos.length} cobros` },
+    {
+      id: 'saldo',
+      etiqueta: 'Saldo a favor de clientes',
+      detalle: `${datos.movimientos.length} movimientos en el período`,
+    },
     { id: 'itbis', etiqueta: 'ITBIS en ventas (607)', detalle: 'Base para la DGII' },
     { id: 'clientes', etiqueta: 'Directorio de clientes', detalle: `${state.clientes.length} clientes` },
     { id: 'prestamos', etiqueta: 'Cartera de préstamos', detalle: `${state.prestamos.length} préstamos` },
@@ -279,6 +336,22 @@ export const ReportesModal: React.FC<ReportesModalProps> = ({ state, onClose }) 
                   {formatCurrency(datos.cobradoPrestamos)}
                 </span>
               </div>
+              {datos.anticipos > 0 || datos.devoluciones > 0 ? (
+                <>
+                  <div>
+                    Anticipos:{' '}
+                    <span className="font-semibold text-slate-800">{formatCurrency(datos.anticipos)}</span>
+                  </div>
+                  <div>
+                    Devoluciones:{' '}
+                    <span className="font-semibold text-slate-800">−{formatCurrency(datos.devoluciones)}</span>
+                  </div>
+                  <div className="col-span-2">
+                    Neto en caja:{' '}
+                    <span className="font-bold text-emerald-800">{formatCurrency(datos.netoCaja)}</span>
+                  </div>
+                </>
+              ) : null}
               <div>
                 Facturas emitidas:{' '}
                 <span className="font-semibold text-slate-800">{datos.facturas.length}</span>
@@ -289,6 +362,36 @@ export const ReportesModal: React.FC<ReportesModalProps> = ({ state, onClose }) 
               </div>
             </div>
           </div>
+
+          {/* Saldo a favor */}
+          {datos.saldoVigente !== 0 || datos.movimientos.length > 0 ? (
+            <div className="bg-sky-50 border border-sky-200 rounded-2xl p-4 space-y-2">
+              <h4 className="text-xs font-bold text-sky-900/70 uppercase tracking-wider">
+                Saldo a favor de clientes
+              </h4>
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="col-span-2">
+                  <span className="block text-[11px] text-sky-900/70">
+                    Vigente hoy · lo que el negocio les debe ({datos.saldosClientes.size}{' '}
+                    {datos.saldosClientes.size === 1 ? 'cliente' : 'clientes'})
+                  </span>
+                  <span className="font-black text-sky-800">{formatCurrency(datos.saldoVigente)}</span>
+                </div>
+                <div>
+                  <span className="block text-[11px] text-sky-900/70">Generado en el período</span>
+                  <span className="font-bold text-slate-800">{formatCurrency(datos.saldoGenerado)}</span>
+                </div>
+                <div>
+                  <span className="block text-[11px] text-sky-900/70">Usado en el período</span>
+                  <span className="font-bold text-slate-800">{formatCurrency(datos.saldoUsado)}</span>
+                </div>
+                <div>
+                  <span className="block text-[11px] text-sky-900/70">Devuelto en el período</span>
+                  <span className="font-bold text-slate-800">{formatCurrency(datos.devoluciones)}</span>
+                </div>
+              </div>
+            </div>
+          ) : null}
 
           {/* Descargas */}
           <div className="space-y-2">

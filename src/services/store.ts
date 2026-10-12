@@ -30,6 +30,7 @@ export const ESTADO_VACIO: AppState = {
   facturas: [],
   prestamos: [],
   pagos: [],
+  movimientosCredito: [],
 };
 
 function claveDe(userId: string): string {
@@ -54,6 +55,7 @@ export function leerCache(userId: string): AppState | null {
       facturas: parsed.facturas ?? [],
       prestamos: parsed.prestamos ?? [],
       pagos: parsed.pagos ?? [],
+      movimientosCredito: parsed.movimientosCredito ?? [],
     };
   } catch {
     // Una caché corrupta no debe impedir usar la aplicación

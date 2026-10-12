@@ -1,5 +1,5 @@
 import React from 'react';
-import type { BusinessSettings, Cliente, Cuota, Pago, Prestamo } from '../types';
+import type { BusinessSettings, Cliente, Cuota, MovimientoCredito, Pago, Prestamo } from '../types';
 import { mensajeAbono, mensajePrestamo, mensajeSaldo } from '../utils/whatsapp';
 import { VistaPreviaModal } from './documentos/VistaPreviaModal';
 import { referenciaAbono, referenciaPrestamo } from '../utils/documentosPrestamo';
@@ -9,6 +9,7 @@ import {
 } from './documentos/DocumentoPrestamo';
 import { ReciboAbonoA4, ReciboAbonoTermico } from './documentos/DocumentoAbono';
 import { ReciboSaldoA4, ReciboSaldoTermico } from './documentos/DocumentoSaldo';
+import { saldoClienteHasta } from '../utils/creditos';
 
 /**
  * Qué se está imprimiendo: el comprobante del préstamo completo, el recibo
@@ -23,7 +24,26 @@ interface PrestamoPdfModalProps {
   documento: DocumentoPrestamo;
   cliente?: Cliente;
   settings: BusinessSettings;
+  /** Libro de saldo a favor, para que el recibo diga cuánto le quedó al cliente. */
+  movimientosCredito?: MovimientoCredito[];
   onClose: () => void;
+}
+
+/**
+ * Saldo a favor del cliente justo después de un pago; `null` si hasta ese
+ * momento nunca había tenido, para no llenar recibos viejos de ceros.
+ */
+function saldoTrasPago(
+  movimientos: MovimientoCredito[] | undefined,
+  cliente: Cliente | undefined,
+  fecha: string | undefined
+): number | null {
+  if (!cliente || !fecha) return null;
+  const limite = Date.parse(fecha);
+  const previos = (movimientos ?? []).filter(
+    (m) => m.cliente_id === cliente.id && Date.parse(m.fecha) <= limite
+  );
+  return previos.length > 0 ? saldoClienteHasta(previos, cliente.id, fecha) : null;
 }
 
 /** Vista previa del comprobante de préstamo o del recibo de abono. */
@@ -31,11 +51,13 @@ export const PrestamoPdfModal: React.FC<PrestamoPdfModalProps> = ({
   documento,
   cliente,
   settings,
+  movimientosCredito,
   onClose,
 }) => {
   if (documento.tipo === 'saldo') {
     const { prestamo, pagos } = documento;
     const referencia = `SAL-${prestamo.id.slice(0, 8).toUpperCase()}`;
+    const saldoAFavor = saldoTrasPago(movimientosCredito, cliente, pagos[0]?.fecha);
 
     return (
       <VistaPreviaModal
@@ -43,7 +65,7 @@ export const PrestamoPdfModal: React.FC<PrestamoPdfModalProps> = ({
         subtitulo={`${pagos.length} cuota${pagos.length === 1 ? '' : 's'} liquidada${pagos.length === 1 ? '' : 's'} · préstamo saldado`}
         archivoBase={referencia}
         tituloCompartir={`Recibo de saldo ${referencia}`}
-        textoWhatsapp={mensajeSaldo(prestamo, pagos, cliente, settings)}
+        textoWhatsapp={mensajeSaldo(prestamo, pagos, cliente, settings, saldoAFavor)}
         telefono={cliente?.telefono}
         onClose={onClose}
       >
@@ -56,6 +78,7 @@ export const PrestamoPdfModal: React.FC<PrestamoPdfModalProps> = ({
               cliente={cliente}
               settings={settings}
               formato={formato}
+              saldoAFavor={saldoAFavor}
             />
           ) : (
             <ReciboSaldoA4
@@ -64,6 +87,7 @@ export const PrestamoPdfModal: React.FC<PrestamoPdfModalProps> = ({
               pagos={pagos}
               cliente={cliente}
               settings={settings}
+              saldoAFavor={saldoAFavor}
             />
           )
         }
@@ -74,6 +98,7 @@ export const PrestamoPdfModal: React.FC<PrestamoPdfModalProps> = ({
   if (documento.tipo === 'abono') {
     const { prestamo, cuota, pago } = documento;
     const referencia = referenciaAbono(pago);
+    const saldoAFavor = saldoTrasPago(movimientosCredito, cliente, pago.fecha);
 
     return (
       <VistaPreviaModal
@@ -81,7 +106,7 @@ export const PrestamoPdfModal: React.FC<PrestamoPdfModalProps> = ({
         subtitulo={`Cuota #${cuota.numero} de ${prestamo.num_cuotas}`}
         archivoBase={referencia}
         tituloCompartir={`Recibo de abono ${referencia}`}
-        textoWhatsapp={mensajeAbono(prestamo, cuota, pago, cliente, settings)}
+        textoWhatsapp={mensajeAbono(prestamo, cuota, pago, cliente, settings, saldoAFavor)}
         telefono={cliente?.telefono}
         onClose={onClose}
       >
@@ -95,6 +120,7 @@ export const PrestamoPdfModal: React.FC<PrestamoPdfModalProps> = ({
               cliente={cliente}
               settings={settings}
               formato={formato}
+              saldoAFavor={saldoAFavor}
             />
           ) : (
             <ReciboAbonoA4
@@ -104,6 +130,7 @@ export const PrestamoPdfModal: React.FC<PrestamoPdfModalProps> = ({
               pago={pago}
               cliente={cliente}
               settings={settings}
+              saldoAFavor={saldoAFavor}
             />
           )
         }

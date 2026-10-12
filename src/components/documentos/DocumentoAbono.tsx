@@ -15,6 +15,7 @@ import {
   TituloDocumentoA4,
 } from './piezas';
 import { montoTermico } from '../../utils/formatoTermico';
+import { aCuotaDePago } from '../../utils/creditos';
 import {
   METODOS_PAGO,
   estadoTrasPago,
@@ -29,6 +30,11 @@ interface Props {
   pago: Pago;
   cliente?: Cliente;
   settings: BusinessSettings;
+  /**
+   * Saldo a favor que le quedó al cliente con este pago; `null` si nunca ha
+   * tenido, para no llenar el recibo de ceros.
+   */
+  saldoAFavor?: number | null;
 }
 
 /**
@@ -38,6 +44,8 @@ interface Props {
 function resumen(prestamo: Prestamo, cuota: Cuota, pago: Pago) {
   const estado = estadoTrasPago(prestamo, cuota, pago);
   const aMora = redondearDinero(pago.monto_mora || 0);
+  const efectivo = redondearDinero(pago.monto || 0);
+  const credito = redondearDinero(pago.credito_usado || 0);
 
   return {
     ...estado,
@@ -45,7 +53,13 @@ function resumen(prestamo: Prestamo, cuota: Cuota, pago: Pago) {
     // decir cuánto fue a cada cosa o el cliente no entiende por qué su
     // cuota bajó menos de lo que entregó.
     aMora,
-    aCuota: redondearDinero(pago.monto - aMora),
+    aCuota: aCuotaDePago(pago),
+    efectivo,
+    credito,
+    excedente: redondearDinero(pago.excedente || 0),
+    // Sin efectivo, lo que se destaca es lo pagado con su saldo
+    montoDestacado: efectivo > 0 ? efectivo : credito,
+    tituloMonto: efectivo > 0 ? 'Monto recibido' : 'Pagado con saldo a favor',
     // De la mora sólo se sabe la de hoy: en la reimpresión de un abono
     // anterior se omite en vez de mezclar fechas.
     moraCuota: estado.esElUltimo ? moraPendiente(cuota) : 0,
@@ -64,6 +78,7 @@ export const ReciboAbonoA4: React.FC<Props> = ({
   pago,
   cliente,
   settings,
+  saldoAFavor = null,
 }) => {
   const {
     abonadoCuota,
@@ -74,7 +89,13 @@ export const ReciboAbonoA4: React.FC<Props> = ({
     aCuota,
     moraCuota,
     moraPrestamo,
+    efectivo,
+    credito,
+    excedente,
+    montoDestacado,
+    tituloMonto,
   } = resumen(prestamo, cuota, pago);
+  const desglose = aMora > 0 || credito > 0 || excedente > 0;
 
   return (
     <div
@@ -113,24 +134,36 @@ export const ReciboAbonoA4: React.FC<Props> = ({
       {/* El monto es lo que el cliente viene a comprobar: va grande */}
       <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-5 text-center">
         <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-800">
-          Monto recibido
+          {tituloMonto}
         </div>
         <div className="text-3xl font-black text-emerald-700 mt-1">
-          {formatCurrency(pago.monto)}
+          {formatCurrency(montoDestacado)}
         </div>
         <div className="text-xs text-slate-600 mt-1">
           {METODOS_PAGO[pago.metodo] ?? pago.metodo}
           {pago.referencia ? ` · Ref: ${pago.referencia}` : ''}
         </div>
 
-        {aMora > 0 ? (
-          <div className="flex justify-center gap-6 mt-3 pt-2 border-t border-emerald-200 text-xs">
-            <span className="text-amber-900">
-              A la mora: <strong>{formatCurrency(aMora)}</strong>
-            </span>
+        {desglose ? (
+          <div className="flex flex-wrap justify-center gap-x-6 gap-y-1 mt-3 pt-2 border-t border-emerald-200 text-xs">
+            {efectivo > 0 && credito > 0 ? (
+              <span className="text-sky-800">
+                + Saldo a favor: <strong>{formatCurrency(credito)}</strong>
+              </span>
+            ) : null}
+            {aMora > 0 ? (
+              <span className="text-amber-900">
+                A la mora: <strong>{formatCurrency(aMora)}</strong>
+              </span>
+            ) : null}
             <span className="text-slate-700">
               A la cuota: <strong>{formatCurrency(aCuota)}</strong>
             </span>
+            {excedente > 0 ? (
+              <span className="text-sky-800">
+                Queda a su favor: <strong>{formatCurrency(excedente)}</strong>
+              </span>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -208,6 +241,12 @@ export const ReciboAbonoA4: React.FC<Props> = ({
               PRÉSTAMO SALDADO POR COMPLETO
             </div>
           ) : null}
+          {saldoAFavor !== null ? (
+            <div className="flex justify-between text-sky-900 font-bold bg-sky-50 border border-sky-200 p-1.5 rounded">
+              <span>Su saldo a favor:</span>
+              <span>{formatCurrency(saldoAFavor)}</span>
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -235,6 +274,7 @@ export const ReciboAbonoTermico: React.FC<Props & { formato: FormatoImpresion }>
   cliente,
   settings,
   formato,
+  saldoAFavor = null,
 }) => {
   const estrecho = formato === '58mm';
   const monto = (valor: number) => montoTermico(formatCurrency(valor), estrecho);
@@ -250,7 +290,13 @@ export const ReciboAbonoTermico: React.FC<Props & { formato: FormatoImpresion }>
     aCuota,
     moraCuota,
     moraPrestamo,
+    efectivo,
+    credito,
+    excedente,
+    montoDestacado,
+    tituloMonto,
   } = resumen(prestamo, cuota, pago);
+  const desglose = aMora > 0 || credito > 0 || excedente > 0;
 
   return (
     <HojaTermica id={id} formato={formato}>
@@ -278,16 +324,22 @@ export const ReciboAbonoTermico: React.FC<Props & { formato: FormatoImpresion }>
 
       {/* El monto recibido es lo que el cliente mira: va grande y centrado */}
       <div className="text-center py-1">
-        <div className="font-bold uppercase">Monto recibido</div>
-        <div className={`${grande} font-bold tabular-nums`}>{formatCurrency(pago.monto)}</div>
+        <div className="font-bold uppercase">{tituloMonto}</div>
+        <div className={`${grande} font-bold tabular-nums`}>{formatCurrency(montoDestacado)}</div>
         <div>{METODOS_PAGO[pago.metodo] ?? pago.metodo}</div>
         {pago.referencia ? <div className="break-words">Ref: {pago.referencia}</div> : null}
       </div>
 
-      {aMora > 0 ? (
+      {desglose ? (
         <div className="space-y-0.5 pt-1 border-t border-dashed border-black">
-          <FilaTermica etiqueta="A la mora:" valor={monto(aMora)} />
+          {efectivo > 0 && credito > 0 ? (
+            <FilaTermica etiqueta="+ Saldo a favor:" valor={monto(credito)} />
+          ) : null}
+          {aMora > 0 ? <FilaTermica etiqueta="A la mora:" valor={monto(aMora)} /> : null}
           <FilaTermica etiqueta="A la cuota:" valor={monto(aCuota)} />
+          {excedente > 0 ? (
+            <FilaTermica etiqueta="Queda a su favor:" valor={monto(excedente)} fuerte />
+          ) : null}
         </div>
       ) : null}
 
@@ -325,6 +377,9 @@ export const ReciboAbonoTermico: React.FC<Props & { formato: FormatoImpresion }>
         </div>
         {saldoPrestamo <= 0 ? (
           <div className="text-center font-bold pt-1">PRÉSTAMO SALDADO</div>
+        ) : null}
+        {saldoAFavor !== null ? (
+          <FilaTermica etiqueta="Su saldo a favor:" valor={monto(saldoAFavor)} fuerte />
         ) : null}
       </div>
 

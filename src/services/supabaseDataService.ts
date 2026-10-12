@@ -6,8 +6,10 @@ import type {
   Cotizacion,
   Factura,
   LineaDocumento,
+  MetodoCobro,
   MetodoPago,
   ModoMora,
+  MovimientoCredito,
   Pago,
   Prestamo,
   Servicio,
@@ -238,13 +240,24 @@ export const supabaseDataService = {
     ) as Cliente;
   },
 
-  async contarHistorialCliente(
-    id: string
-  ): Promise<{ cotizaciones: number; facturas: number; prestamos: number }> {
+  async contarHistorialCliente(id: string): Promise<{
+    cotizaciones: number;
+    facturas: number;
+    prestamos: number;
+    movimientos_credito: number;
+    saldo_a_favor: number;
+  }> {
     const supabase = requireSupabaseClient();
     const { data, error } = await supabase.rpc('contar_historial_cliente', { p_cliente_id: id });
     if (error) throw traducir(error, 'consultar el historial del cliente');
-    return data as { cotizaciones: number; facturas: number; prestamos: number };
+    const historial = data as Record<string, number | undefined>;
+    return {
+      cotizaciones: Number(historial.cotizaciones) || 0,
+      facturas: Number(historial.facturas) || 0,
+      prestamos: Number(historial.prestamos) || 0,
+      movimientos_credito: Number(historial.movimientos_credito) || 0,
+      saldo_a_favor: Number(historial.saldo_a_favor) || 0,
+    };
   },
 
   /** Devuelve 'eliminado' o 'desactivado' según si el cliente tenía historial. */
@@ -398,12 +411,16 @@ export const supabaseDataService = {
     if (error) throw traducir(error, 'eliminar la factura');
   },
 
-  /** El servidor rechaza el sobrepago en vez de recortarlo en silencio. */
+  /**
+   * `monto` es el efectivo recibido y `credito` el saldo a favor que se
+   * decidió usar. Lo que pase del saldo pendiente queda a favor del cliente.
+   */
   async registrarPagoFactura(
     facturaId: string,
     monto: number,
     metodo: MetodoPago,
-    referencia?: string
+    referencia?: string,
+    credito = 0
   ): Promise<Factura> {
     const supabase = requireSupabaseClient();
     const { data, error } = await supabase.rpc('registrar_pago_factura', {
@@ -411,6 +428,7 @@ export const supabaseDataService = {
       p_monto: monto,
       p_metodo: metodo,
       p_referencia: referencia ?? null,
+      p_credito: credito,
     });
 
     if (error) throw traducir(error, 'registrar el pago');
@@ -471,12 +489,17 @@ export const supabaseDataService = {
    * `montoEsperado` es la cifra que el cobrador vio y confirmó. Si en el
    * servidor el total ya no coincide —la mora pudo sumar un día— el cobro
    * se detiene en vez de cobrar un monto distinto del que se vio.
+   *
+   * `recibido` es el efectivo entregado (sin darlo, justo lo que falta tras
+   * el saldo usado); si pasa del total, el resto queda a favor del cliente.
    */
   async saldarPrestamo(
     prestamoId: string,
     montoEsperado: number,
     metodo: MetodoPago,
-    referencia?: string
+    referencia?: string,
+    recibido?: number,
+    credito = 0
   ): Promise<Prestamo> {
     const supabase = requireSupabaseClient();
     const { data, error } = await supabase.rpc('saldar_prestamo', {
@@ -484,6 +507,8 @@ export const supabaseDataService = {
       p_monto_esperado: montoEsperado,
       p_metodo: metodo,
       p_referencia: referencia ?? null,
+      p_recibido: recibido ?? null,
+      p_credito: credito,
     });
 
     if (error) throw traducir(error, 'saldar el préstamo');
@@ -519,15 +544,17 @@ export const supabaseDataService = {
 
   /**
    * Admite abonos parciales: el monto no tiene por qué ser la cuota
-   * completa. `montoMora` es la parte del total entregado que se aplica a
-   * la mora; el resto va a la cuota.
+   * completa. `monto` es el efectivo recibido y `credito` el saldo a favor
+   * que se decidió usar; de lo entregado, `montoMora` va a la mora, el resto
+   * a la cuota, y lo que pase de la cuota queda a favor del cliente.
    */
   async registrarPagoCuota(
     cuotaId: string,
     monto: number,
     metodo: MetodoPago,
     referencia?: string,
-    montoMora = 0
+    montoMora = 0,
+    credito = 0
   ): Promise<Prestamo> {
     const supabase = requireSupabaseClient();
     const { data, error } = await supabase.rpc('registrar_pago_cuota', {
@@ -536,10 +563,68 @@ export const supabaseDataService = {
       p_metodo: metodo,
       p_referencia: referencia ?? null,
       p_monto_mora: montoMora,
+      p_credito: credito,
     });
 
     if (error) throw traducir(error, 'registrar el abono de la cuota');
     return data as Prestamo;
+  },
+
+  // ===================================================================
+  // Saldo a favor
+  // ===================================================================
+
+  async fetchMovimientosCredito(clienteId?: string): Promise<MovimientoCredito[]> {
+    const supabase = requireSupabaseClient();
+    let consulta = supabase
+      .from('movimientos_credito')
+      .select('*')
+      .order('fecha', { ascending: true })
+      .order('id', { ascending: true });
+    if (clienteId) consulta = consulta.eq('cliente_id', clienteId);
+    return lanzarSiFalla(await consulta, 'cargar el saldo a favor') as MovimientoCredito[];
+  },
+
+  /** Dinero que el cliente deja a su favor sin deber nada en ese momento. */
+  async registrarAnticipo(
+    clienteId: string,
+    monto: number,
+    metodo: MetodoCobro,
+    referencia?: string,
+    nota?: string
+  ): Promise<MovimientoCredito> {
+    const supabase = requireSupabaseClient();
+    const { data, error } = await supabase.rpc('registrar_anticipo', {
+      p_cliente_id: clienteId,
+      p_monto: monto,
+      p_metodo: metodo,
+      p_referencia: referencia ?? null,
+      p_nota: nota ?? null,
+    });
+
+    if (error) throw traducir(error, 'registrar el anticipo');
+    return data as MovimientoCredito;
+  },
+
+  /** Devuelve al cliente parte o todo su saldo a favor. */
+  async devolverSaldo(
+    clienteId: string,
+    monto: number,
+    metodo: MetodoCobro,
+    referencia?: string,
+    nota?: string
+  ): Promise<MovimientoCredito> {
+    const supabase = requireSupabaseClient();
+    const { data, error } = await supabase.rpc('devolver_saldo', {
+      p_cliente_id: clienteId,
+      p_monto: monto,
+      p_metodo: metodo,
+      p_referencia: referencia ?? null,
+      p_nota: nota ?? null,
+    });
+
+    if (error) throw traducir(error, 'devolver el saldo a favor');
+    return data as MovimientoCredito;
   },
 
   // ===================================================================

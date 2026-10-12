@@ -1,4 +1,13 @@
-import type { Cotizacion, Factura, Prestamo, Cuota, Pago, Cliente, BusinessSettings } from '../types';
+import type {
+  Cotizacion,
+  Factura,
+  Prestamo,
+  Cuota,
+  Pago,
+  Cliente,
+  BusinessSettings,
+  MovimientoCredito,
+} from '../types';
 import { formatCurrency, formatDate } from './sanitizer';
 import { telefonoParaWhatsapp } from './validacion';
 import { estadoTrasPago } from './documentosPrestamo';
@@ -112,7 +121,8 @@ export function mensajeAbono(
   cuota: Cuota,
   pago: Pago,
   cliente?: Cliente,
-  settings?: BusinessSettings
+  settings?: BusinessSettings,
+  saldoAFavor: number | null = null
 ): string {
   const businessName = settings?.business_name || 'Nuestro negocio';
   // El saldo que dejó este abono, igual que en el recibo que acompaña
@@ -121,15 +131,29 @@ export function mensajeAbono(
   let msg = `*Recibo de abono — ${businessName}*\n\n`;
   msg += `Hola *${cliente?.nombre || 'Cliente'}*,\n`;
   msg += `Confirmamos su pago:\n\n`;
-  msg += `✅ *Monto recibido:* ${formatCurrency(pago.monto)}\n`;
+  msg += lineasCredito(pago.monto, pago.credito_usado, pago.excedente);
   msg += `📅 *Fecha:* ${formatDate(pago.fecha)}\n`;
   msg += `🧾 *Cuota:* #${cuota.numero} de ${prestamo.num_cuotas}\n`;
   msg += saldo > 0
-    ? `📌 *Saldo del préstamo:* ${formatCurrency(saldo)}\n\n`
-    : `🟢 *PRÉSTAMO SALDADO POR COMPLETO*\n\n`;
-  msg += `Adjuntamos el recibo. ¡Gracias por su puntualidad!`;
+    ? `📌 *Saldo del préstamo:* ${formatCurrency(saldo)}\n`
+    : `🟢 *PRÉSTAMO SALDADO POR COMPLETO*\n`;
+  if (saldoAFavor !== null) msg += `💰 *Su saldo a favor:* ${formatCurrency(saldoAFavor)}\n`;
+  msg += `\nAdjuntamos el recibo. ¡Gracias por su puntualidad!`;
 
   return msg;
+}
+
+/** Lo recibido, lo pagado con saldo a favor y lo que quedó a favor. */
+function lineasCredito(efectivo: number, credito = 0, excedente = 0): string {
+  let lineas =
+    (Number(efectivo) || 0) > 0
+      ? `✅ *Monto recibido:* ${formatCurrency(efectivo)}\n`
+      : `💳 *Pagado con su saldo a favor:* ${formatCurrency(credito)}\n`;
+  if ((Number(efectivo) || 0) > 0 && credito > 0) {
+    lineas += `💳 *Más su saldo a favor:* ${formatCurrency(credito)}\n`;
+  }
+  if (excedente > 0) lineas += `💰 *Queda a su favor:* ${formatCurrency(excedente)}\n`;
+  return lineas;
 }
 
 /** Resumen del saldo para acompañar a su recibo en PDF. */
@@ -137,20 +161,45 @@ export function mensajeSaldo(
   prestamo: Prestamo,
   pagos: Pago[],
   cliente?: Cliente,
-  settings?: BusinessSettings
+  settings?: BusinessSettings,
+  saldoAFavor: number | null = null
 ): string {
   const businessName = settings?.business_name || 'Nuestro negocio';
-  const total = pagos.reduce((a, p) => a + p.monto, 0);
-  const mora = pagos.reduce((a, p) => a + (p.monto_mora || 0), 0);
+  const suma = (campo: (p: Pago) => number) => pagos.reduce((a, p) => a + (Number(campo(p)) || 0), 0);
+  const mora = suma((p) => p.monto_mora);
 
   let msg = `*Préstamo saldado — ${businessName}*\n\n`;
   msg += `Hola *${cliente?.nombre || 'Cliente'}*,\n`;
   msg += `Confirmamos que su préstamo quedó saldado por completo.\n\n`;
-  msg += `✅ *Monto recibido:* ${formatCurrency(total)}\n`;
+  msg += lineasCredito(suma((p) => p.monto), suma((p) => p.credito_usado), suma((p) => p.excedente));
   msg += `🧾 *Cuotas liquidadas:* ${pagos.length} de ${prestamo.num_cuotas}\n`;
   if (mora > 0) msg += `⚠️ *Incluye mora:* ${formatCurrency(mora)}\n`;
-  msg += `🟢 *Saldo pendiente:* ${formatCurrency(0)}\n\n`;
-  msg += `Adjuntamos el recibo. ¡Gracias por su confianza!`;
+  msg += `🟢 *Saldo pendiente:* ${formatCurrency(0)}\n`;
+  if (saldoAFavor !== null) msg += `💰 *Su saldo a favor:* ${formatCurrency(saldoAFavor)}\n`;
+  msg += `\nAdjuntamos el recibo. ¡Gracias por su confianza!`;
+
+  return msg;
+}
+
+/** Mensaje que acompaña al comprobante de un anticipo o una devolución. */
+export function mensajeMovimientoCredito(
+  mov: MovimientoCredito,
+  saldoAFavor: number,
+  cliente?: Cliente,
+  settings?: BusinessSettings
+): string {
+  const businessName = settings?.business_name || 'Nuestro negocio';
+  const esDevolucion = mov.tipo === 'devolucion';
+
+  let msg = `*${esDevolucion ? 'Devolución de saldo a favor' : 'Anticipo recibido'} — ${businessName}*\n\n`;
+  msg += `Hola *${cliente?.nombre || 'Cliente'}*,\n`;
+  msg += esDevolucion
+    ? `Le devolvimos parte de su saldo a favor:\n\n`
+    : `Recibimos su anticipo, que queda a su favor:\n\n`;
+  msg += `${esDevolucion ? '↩️ *Monto devuelto:*' : '✅ *Monto recibido:*'} ${formatCurrency(Math.abs(mov.monto))}\n`;
+  msg += `📅 *Fecha:* ${formatDate(mov.fecha)}\n`;
+  msg += `💰 *Su saldo a favor:* ${formatCurrency(saldoAFavor)}\n\n`;
+  msg += `Adjuntamos el comprobante. ¡Gracias por su confianza!`;
 
   return msg;
 }

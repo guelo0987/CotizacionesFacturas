@@ -40,6 +40,7 @@ import {
 } from '../utils/validacion';
 import { CampoMoneda } from './campos/CampoMoneda';
 import type { DocumentoPrestamo } from './PrestamoPdfModal';
+import { creditoSugerido, repartirCobro, saldoCliente } from '../utils/creditos';
 
 // Diferido, como la vista previa de facturas: arrastra html2pdf con jsPDF y
 // html2canvas, y no tiene por qué descargarse hasta que se imprime algo.
@@ -77,7 +78,8 @@ interface LoansViewProps {
     monto: number,
     metodo: MetodoPago,
     referencia?: string,
-    montoMora?: number
+    montoMora?: number,
+    credito?: number
   ) => Promise<void>;
   onDeletePrestamo: (prestamo: Prestamo) => Promise<void>;
   onConfigurarMora: (
@@ -91,7 +93,9 @@ interface LoansViewProps {
     prestamoId: string,
     montoEsperado: number,
     metodo: MetodoPago,
-    referencia?: string
+    referencia?: string,
+    recibido?: number,
+    credito?: number
   ) => Promise<Prestamo>;
 }
 
@@ -137,6 +141,10 @@ export const LoansView: React.FC<LoansViewProps> = ({
   const [saldandoId, setSaldandoId] = useState<string | null>(null);
   const [saldoMetodo, setSaldoMetodo] = useState<MetodoPago>('efectivo');
   const [saldoRef, setSaldoRef] = useState('');
+  // Saldo a favor usado y efectivo recibido al saldar
+  const [saldoCredito, setSaldoCredito] = useState<number | null>(null);
+  const [saldoRecibido, setSaldoRecibido] = useState<number | null>(null);
+  const [errorSaldo, setErrorSaldo] = useState('');
 
   // Configuración de la mora del préstamo abierto
   const [editandoMora, setEditandoMora] = useState(false);
@@ -151,6 +159,8 @@ export const LoansView: React.FC<LoansViewProps> = ({
   const [pagoMetodo, setPagoMetodo] = useState<MetodoPago>('efectivo');
   const [pagoRef, setPagoRef] = useState('');
   const [errorPago, setErrorPago] = useState('');
+  // Saldo a favor que el cobrador decide usar en el abono
+  const [pagoCredito, setPagoCredito] = useState<number | null>(null);
 
   const { ejecutando, ejecutar } = useAccionAsync();
 
@@ -272,38 +282,61 @@ export const LoansView: React.FC<LoansViewProps> = ({
     setPagoMetodo('efectivo');
     setPagoRef('');
     setErrorPago('');
+    setPagoCredito(null);
   };
+
+  /** Saldo a favor del cliente de un préstamo. */
+  const saldoAFavorDe = (clienteId: string) => saldoCliente(state.movimientosCredito, clienteId);
+
+  /**
+   * Reparto del abono que está escribiendo el cobrador: «A la mora» y «A la
+   * cuota» son lo que se paga; lo que pase de la cuota queda a favor del
+   * cliente, y el saldo usado se descuenta del efectivo que entrega.
+   */
+  const repartoAbono = (() => {
+    if (!cuotaEnPago) return null;
+    const prestamo = state.prestamos.find((p) => p.id === cuotaEnPago.prestamo_id);
+    const restante = redondearDinero(cuotaEnPago.monto - (cuotaEnPago.monto_pagado || 0));
+    const aMora = redondearDinero(pagoMora ?? 0);
+    const aCuota = redondearDinero(pagoMonto ?? 0);
+    const credito = redondearDinero(pagoCredito ?? 0);
+    const saldoDisponible = prestamo ? saldoAFavorDe(prestamo.cliente_id) : 0;
+    return {
+      restante,
+      aMora,
+      aCuota,
+      saldoDisponible,
+      ...repartirCobro({
+        efectivo: redondearDinero(aMora + aCuota - credito),
+        credito,
+        deuda: redondearDinero(aMora + restante),
+        saldoDisponible,
+      }),
+    };
+  })();
 
   const handleConfirmarPagoCuota = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!cuotaEnPago) return;
+    if (!cuotaEnPago || !repartoAbono) return;
 
-    const restante = redondearDinero(cuotaEnPago.monto - (cuotaEnPago.monto_pagado || 0));
     const moraPend = moraPendiente(cuotaEnPago);
-    const aCuota = redondearDinero(pagoMonto ?? 0);
-    const aMora = redondearDinero(pagoMora ?? 0);
-    const total = redondearDinero(aCuota + aMora);
-
-    if (total <= 0) {
-      setErrorPago('El abono debe ser mayor que cero.');
-      return;
-    }
-    if (aMora > moraPend) {
+    if (repartoAbono.aMora > moraPend) {
       setErrorPago(`La parte de mora supera la mora pendiente (${formatCurrency(moraPend)}).`);
       return;
     }
-    if (aCuota > restante) {
-      setErrorPago(`El abono a la cuota supera lo que resta (${formatCurrency(restante)}).`);
+    if (repartoAbono.error) {
+      setErrorPago(repartoAbono.error);
       return;
     }
 
     const ok = await ejecutar(() =>
       onRegistrarPagoCuota(
         cuotaEnPago.id,
-        total,
+        repartoAbono.efectivo,
         pagoMetodo,
         limpiarTexto(pagoRef, 120) || undefined,
-        aMora
+        repartoAbono.aMora,
+        repartoAbono.credito
       )
     );
 
@@ -322,6 +355,40 @@ export const LoansView: React.FC<LoansViewProps> = ({
     setSaldandoId(prestamo.id);
     setSaldoMetodo('efectivo');
     setSaldoRef('');
+    setSaldoCredito(null);
+    setSaldoRecibido(calcularSaldoParaSaldar(prestamo).total);
+    setErrorSaldo('');
+  };
+
+  /** Reparto del saldo: efectivo y saldo a favor contra el total para saldar. */
+  const repartoSaldo = (() => {
+    if (!prestamoSaldando) return null;
+    const { total } = calcularSaldoParaSaldar(prestamoSaldando);
+    const credito = redondearDinero(saldoCredito ?? 0);
+    const saldoDisponible = saldoAFavorDe(prestamoSaldando.cliente_id);
+    const reparto = repartirCobro({
+      efectivo: redondearDinero(saldoRecibido ?? 0),
+      credito,
+      deuda: total,
+      saldoDisponible,
+    });
+    const falta = redondearDinero(total - reparto.entregado);
+    return {
+      total,
+      saldoDisponible,
+      ...reparto,
+      // Saldar es pagarlo todo: un abono parcial se hace por cuota
+      error: reparto.error ?? (falta > 0 ? `Para saldar faltan ${formatCurrency(falta)}.` : null),
+    };
+  })();
+
+  /** Cambia el saldo usado y ajusta el efectivo a lo que falte. */
+  const cambiarCreditoSaldo = (credito: number | null) => {
+    setSaldoCredito(credito);
+    setErrorSaldo('');
+    if (repartoSaldo) {
+      setSaldoRecibido(redondearDinero(Math.max(0, repartoSaldo.total - (credito ?? 0))));
+    }
   };
 
   /** Pagos que generó el saldo de un préstamo, para su recibo. */
@@ -329,16 +396,21 @@ export const LoansView: React.FC<LoansViewProps> = ({
     (prestamo.pagos ?? []).filter((pago) => pago.saldo_de_prestamo);
 
   const confirmarSaldo = async () => {
-    if (!prestamoSaldando) return;
-    const { total } = calcularSaldoParaSaldar(prestamoSaldando);
+    if (!prestamoSaldando || !repartoSaldo) return;
+    if (repartoSaldo.error) {
+      setErrorSaldo(repartoSaldo.error);
+      return;
+    }
 
     let saldado: Prestamo | null = null;
     const ok = await ejecutar(async () => {
       saldado = await onSaldarPrestamo(
         prestamoSaldando.id,
-        total,
+        repartoSaldo.total,
         saldoMetodo,
-        limpiarTexto(saldoRef, 120) || undefined
+        limpiarTexto(saldoRef, 120) || undefined,
+        repartoSaldo.efectivo,
+        repartoSaldo.credito
       );
     });
 
@@ -1453,6 +1525,58 @@ export const LoansView: React.FC<LoansViewProps> = ({
                     </div>
                   </div>
 
+                  {repartoSaldo && repartoSaldo.saldoDisponible > 0 ? (
+                    <div className="bg-sky-50 border border-sky-200 rounded-xl p-3 space-y-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <label htmlFor="saldo-credito" className="text-sm font-semibold text-sky-900">
+                          Usar de su saldo a favor
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            cambiarCreditoSaldo(creditoSugerido(repartoSaldo.saldoDisponible, saldo.total))
+                          }
+                          className="text-xs font-bold text-sky-800 bg-white border border-sky-200 hover:bg-sky-100 rounded-lg px-2 py-1"
+                        >
+                          Usar lo justo
+                        </button>
+                      </div>
+                      <CampoMoneda id="saldo-credito" value={saldoCredito} onChange={cambiarCreditoSaldo} />
+                      <p className="text-[11px] text-sky-900/70">
+                        Disponible: {formatCurrency(repartoSaldo.saldoDisponible)}
+                      </p>
+                    </div>
+                  ) : null}
+
+                  <div>
+                    <label htmlFor="saldo-recibido" className="block text-sm font-semibold text-slate-700 mb-1">
+                      Efectivo que recibes
+                    </label>
+                    <CampoMoneda
+                      id="saldo-recibido"
+                      value={saldoRecibido}
+                      onChange={(monto) => {
+                        setSaldoRecibido(monto);
+                        setErrorSaldo('');
+                      }}
+                    />
+                    {repartoSaldo && repartoSaldo.excedente > 0 && !repartoSaldo.error ? (
+                      <p className="text-xs font-semibold text-sky-800 mt-1">
+                        Entrega de más: {formatCurrency(repartoSaldo.excedente)} quedarán a favor del cliente.
+                      </p>
+                    ) : null}
+                  </div>
+
+                  {errorSaldo || repartoSaldo?.error ? (
+                    <div
+                      role="alert"
+                      className="bg-red-50 border border-red-200 text-red-700 text-xs p-2.5 rounded-xl flex items-start gap-2"
+                    >
+                      <AlertCircle className="w-4 h-4 shrink-0" />
+                      <span>{errorSaldo || repartoSaldo?.error}</span>
+                    </div>
+                  ) : null}
+
                   <div>
                     <label
                       htmlFor="saldo-metodo"
@@ -1492,7 +1616,8 @@ export const LoansView: React.FC<LoansViewProps> = ({
 
                   <p className="text-[11px] text-slate-500 leading-snug">
                     Se cobran todas las cuotas pendientes completas, con sus intereses, más la
-                    mora. El préstamo queda saldado y no se puede deshacer.
+                    mora. El préstamo queda saldado y no se puede deshacer. Si entrega de más, el
+                    resto queda como saldo a favor del cliente.
                   </p>
                 </div>
 
@@ -1505,10 +1630,14 @@ export const LoansView: React.FC<LoansViewProps> = ({
                   </button>
                   <button
                     onClick={() => void confirmarSaldo()}
-                    disabled={ejecutando || saldo.total <= 0}
+                    disabled={ejecutando || saldo.total <= 0 || Boolean(repartoSaldo?.error)}
                     className="px-4 py-2 rounded-xl text-sm font-bold bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white transition-colors"
                   >
-                    {ejecutando ? 'Saldando…' : `Cobrar ${formatCurrency(saldo.total)}`}
+                    {ejecutando
+                      ? 'Saldando…'
+                      : repartoSaldo && repartoSaldo.efectivo <= 0 && repartoSaldo.credito > 0
+                        ? 'Saldar con su saldo a favor'
+                        : `Cobrar ${formatCurrency(repartoSaldo?.efectivo ?? saldo.total)}`}
                   </button>
                 </div>
               </div>
@@ -1530,6 +1659,7 @@ export const LoansView: React.FC<LoansViewProps> = ({
             documento={documentoPdf}
             cliente={state.clientes.find((c) => c.id === documentoPdf.prestamo.cliente_id)}
             settings={state.settings}
+            movimientosCredito={state.movimientosCredito}
             onClose={() => setDocumentoPdf(null)}
           />
         </Suspense>
@@ -1636,12 +1766,6 @@ export const LoansView: React.FC<LoansViewProps> = ({
                     />
                   </div>
 
-                  <div className="flex justify-between items-center bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 text-sm">
-                    <span className="font-semibold text-emerald-900">Total que recibes:</span>
-                    <span className="font-black text-emerald-700">
-                      {formatCurrency(redondearDinero((pagoMora ?? 0) + (pagoMonto ?? 0)))}
-                    </span>
-                  </div>
                 </div>
               ) : (
                 <div>
@@ -1658,10 +1782,70 @@ export const LoansView: React.FC<LoansViewProps> = ({
                     className="font-black"
                   />
                   <p className="text-xs text-slate-500 mt-1">
-                    Puedes abonar menos que la cuota completa.
+                    Puedes abonar menos que la cuota; si entrega de más, el resto queda a su favor.
                   </p>
                 </div>
               )}
+
+              {repartoAbono && repartoAbono.saldoDisponible > 0 ? (
+                <div className="bg-sky-50 border border-sky-200 rounded-xl p-3 space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <label htmlFor="cuota-credito" className="text-sm font-semibold text-sky-900">
+                      Usar de su saldo a favor
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        // El saldo es para cubrir la deuda: si se escribió de
+                        // más, el monto se ajusta a lo que resta de la cuota
+                        const aCuota = Math.min(repartoAbono.aCuota || repartoAbono.restante, repartoAbono.restante);
+                        setPagoMonto(aCuota);
+                        setPagoCredito(
+                          creditoSugerido(repartoAbono.saldoDisponible, repartoAbono.aMora + aCuota)
+                        );
+                        setErrorPago('');
+                      }}
+                      className="text-xs font-bold text-sky-800 bg-white border border-sky-200 hover:bg-sky-100 rounded-lg px-2 py-1"
+                    >
+                      Usar lo justo
+                    </button>
+                  </div>
+                  <CampoMoneda
+                    id="cuota-credito"
+                    value={pagoCredito}
+                    onChange={(monto) => {
+                      setPagoCredito(monto);
+                      setErrorPago('');
+                    }}
+                  />
+                  <p className="text-[11px] text-sky-900/70">
+                    Disponible: {formatCurrency(repartoAbono.saldoDisponible)}
+                  </p>
+                </div>
+              ) : null}
+
+              {repartoAbono ? (
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 text-sm space-y-1">
+                  {repartoAbono.credito > 0 ? (
+                    <div className="flex justify-between text-sky-900">
+                      <span>Con su saldo a favor:</span>
+                      <span className="font-semibold">−{formatCurrency(repartoAbono.credito)}</span>
+                    </div>
+                  ) : null}
+                  {repartoAbono.excedente > 0 ? (
+                    <div className="flex justify-between text-sky-900">
+                      <span>Queda a su favor:</span>
+                      <span className="font-semibold">{formatCurrency(repartoAbono.excedente)}</span>
+                    </div>
+                  ) : null}
+                  <div className="flex justify-between items-center">
+                    <span className="font-semibold text-emerald-900">Efectivo que recibes:</span>
+                    <span className="font-black text-emerald-700">
+                      {formatCurrency(Math.max(0, repartoAbono.efectivo))}
+                    </span>
+                  </div>
+                </div>
+              ) : null}
 
               <div>
                 <label htmlFor="cuota-metodo" className="block text-sm font-semibold text-slate-700 mb-1">

@@ -15,6 +15,7 @@ import {
 } from './piezas';
 import { montoTermico } from '../../utils/formatoTermico';
 import { METODOS_PAGO, referenciaPrestamo } from '../../utils/documentosPrestamo';
+import { aCuotaDePago } from '../../utils/creditos';
 
 interface Props {
   id: string;
@@ -23,6 +24,8 @@ interface Props {
   pagos: Pago[];
   cliente?: Cliente;
   settings: BusinessSettings;
+  /** Saldo a favor que le quedó al cliente; `null` si nunca ha tenido. */
+  saldoAFavor?: number | null;
 }
 
 /** Cifras del recibo de saldo, reunidas a partir de sus pagos. */
@@ -32,13 +35,16 @@ function resumen(prestamo: Prestamo, pagos: Pago[]) {
   const lineas = pagos
     .map((p) => ({
       numero: numeroDe.get(p.cuota_id ?? '') ?? 0,
-      aCuota: redondearDinero(p.monto - (p.monto_mora || 0)),
+      aCuota: aCuotaDePago(p),
       mora: redondearDinero(p.monto_mora || 0),
     }))
     .sort((a, b) => a.numero - b.numero);
 
   const totalCuotas = redondearDinero(lineas.reduce((s, l) => s + l.aCuota, 0));
   const totalMora = redondearDinero(lineas.reduce((s, l) => s + l.mora, 0));
+  const efectivo = redondearDinero(pagos.reduce((s, p) => s + (Number(p.monto) || 0), 0));
+  const credito = redondearDinero(pagos.reduce((s, p) => s + (Number(p.credito_usado) || 0), 0));
+  const excedente = redondearDinero(pagos.reduce((s, p) => s + (Number(p.excedente) || 0), 0));
   const primero = pagos[0];
 
   return {
@@ -46,6 +52,12 @@ function resumen(prestamo: Prestamo, pagos: Pago[]) {
     totalCuotas,
     totalMora,
     total: redondearDinero(totalCuotas + totalMora),
+    efectivo,
+    credito,
+    excedente,
+    // Sin efectivo, lo que se destaca es lo pagado con su saldo
+    montoDestacado: efectivo > 0 ? efectivo : credito,
+    tituloMonto: efectivo > 0 ? 'Monto recibido para saldar el préstamo' : 'Saldado con su saldo a favor',
     fecha: primero?.fecha ?? '',
     metodo: primero ? METODOS_PAGO[primero.metodo] ?? primero.metodo : '',
     referencia: primero?.referencia ?? null,
@@ -61,7 +73,14 @@ function referenciaSaldo(prestamo: Prestamo): string {
 // Hoja A4
 // =====================================================================
 
-export const ReciboSaldoA4: React.FC<Props> = ({ id, prestamo, pagos, cliente, settings }) => {
+export const ReciboSaldoA4: React.FC<Props> = ({
+  id,
+  prestamo,
+  pagos,
+  cliente,
+  settings,
+  saldoAFavor = null,
+}) => {
   const r = resumen(prestamo, pagos);
 
   // Compacto a propósito: un préstamo de muchas cuotas saldado temprano
@@ -102,13 +121,20 @@ export const ReciboSaldoA4: React.FC<Props> = ({ id, prestamo, pagos, cliente, s
 
         <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 text-center flex flex-col justify-center">
           <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-800">
-            Monto recibido para saldar el préstamo
+            {r.tituloMonto}
           </div>
-          <div className="text-3xl font-black text-emerald-700 mt-1">{formatCurrency(r.total)}</div>
+          <div className="text-3xl font-black text-emerald-700 mt-1">
+            {formatCurrency(r.montoDestacado)}
+          </div>
           <div className="text-xs text-slate-600 mt-1">
             {r.metodo}
             {r.referencia ? ` · Ref: ${r.referencia}` : ''}
           </div>
+          {r.efectivo > 0 && r.credito > 0 ? (
+            <div className="text-xs text-sky-800 mt-1">
+              + Saldo a favor: <strong>{formatCurrency(r.credito)}</strong>
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -163,9 +189,21 @@ export const ReciboSaldoA4: React.FC<Props> = ({ id, prestamo, pagos, cliente, s
             <span>TOTAL PAGADO:</span>
             <span className="text-emerald-700">{formatCurrency(r.total)}</span>
           </div>
+          {r.excedente > 0 ? (
+            <div className="flex justify-between text-sky-900">
+              <span>Entregó de más, queda a su favor:</span>
+              <span className="font-semibold">{formatCurrency(r.excedente)}</span>
+            </div>
+          ) : null}
           <div className="text-center font-bold text-emerald-800 bg-emerald-100 p-1.5 rounded mt-1">
             PRÉSTAMO SALDADO POR COMPLETO · SALDO RD$0.00
           </div>
+          {saldoAFavor !== null ? (
+            <div className="flex justify-between text-sky-900 font-bold bg-sky-50 border border-sky-200 p-1.5 rounded">
+              <span>Su saldo a favor:</span>
+              <span>{formatCurrency(saldoAFavor)}</span>
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -192,6 +230,7 @@ export const ReciboSaldoTermico: React.FC<Props & { formato: FormatoImpresion }>
   cliente,
   settings,
   formato,
+  saldoAFavor = null,
 }) => {
   const estrecho = formato === '58mm';
   const monto = (valor: number) => montoTermico(formatCurrency(valor), estrecho);
@@ -224,10 +263,11 @@ export const ReciboSaldoTermico: React.FC<Props & { formato: FormatoImpresion }>
       <Separador />
 
       <div className="text-center py-1">
-        <div className="font-bold uppercase">Monto recibido</div>
-        <div className={`${grande} font-bold tabular-nums`}>{formatCurrency(r.total)}</div>
+        <div className="font-bold uppercase">{r.efectivo > 0 ? 'Monto recibido' : 'Con su saldo a favor'}</div>
+        <div className={`${grande} font-bold tabular-nums`}>{formatCurrency(r.montoDestacado)}</div>
         <div>{r.metodo}</div>
         {r.referencia ? <div className="break-words">Ref: {r.referencia}</div> : null}
+        {r.efectivo > 0 && r.credito > 0 ? <div>+ Saldo a favor: {monto(r.credito)}</div> : null}
       </div>
 
       <Separador />
@@ -252,8 +292,14 @@ export const ReciboSaldoTermico: React.FC<Props & { formato: FormatoImpresion }>
           <span>TOTAL:</span>
           <span className="tabular-nums whitespace-nowrap">{formatCurrency(r.total)}</span>
         </div>
+        {r.excedente > 0 ? (
+          <FilaTermica etiqueta="Queda a su favor:" valor={monto(r.excedente)} fuerte />
+        ) : null}
         <div className="text-center font-bold pt-1">PRÉSTAMO SALDADO</div>
         <div className="text-center">Saldo pendiente: {monto(0)}</div>
+        {saldoAFavor !== null ? (
+          <FilaTermica etiqueta="Su saldo a favor:" valor={monto(saldoAFavor)} fuerte />
+        ) : null}
       </div>
 
       <Separador />

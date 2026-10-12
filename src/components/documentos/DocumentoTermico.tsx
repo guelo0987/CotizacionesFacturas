@@ -11,6 +11,8 @@ import {
   Separador,
 } from './piezas';
 import { montoTermico } from '../../utils/formatoTermico';
+import { aplicadoDePago, notaCreditoPago } from '../../utils/creditos';
+import { METODOS_PAGO } from '../../utils/documentosPrestamo';
 
 interface DocumentoTermicoProps {
   id: string;
@@ -134,14 +136,20 @@ export const DocumentoTermico: React.FC<DocumentoTermicoProps> = ({
           <Separador />
           <div className="space-y-0.5">
             <div className="font-bold uppercase">Pagos recibidos</div>
-            {invoice.pagos!.map((pago) => (
-              <div key={pago.id} className="flex justify-between gap-2">
-                <span>
-                  {formatDate(pago.fecha)} {pago.metodo}
-                </span>
-                <span className="tabular-nums whitespace-nowrap">{monto(pago.monto)}</span>
-              </div>
-            ))}
+            {invoice.pagos!.map((pago) => {
+              const nota = notaCreditoPago(pago);
+              return (
+                <div key={pago.id}>
+                  <div className="flex justify-between gap-2">
+                    <span>
+                      {formatDate(pago.fecha)} {METODOS_PAGO[pago.metodo] ?? pago.metodo}
+                    </span>
+                    <span className="tabular-nums whitespace-nowrap">{monto(aplicadoDePago(pago))}</span>
+                  </div>
+                  {nota ? <div className="break-words">{nota}</div> : null}
+                </div>
+              );
+            })}
           </div>
         </>
       ) : null}

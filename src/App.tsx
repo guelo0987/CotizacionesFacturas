@@ -99,9 +99,15 @@ export function App() {
     return () => subscription.unsubscribe();
   }, []);
 
+  // Las cargas dependen del usuario, no del objeto de sesión: Supabase lo
+  // renueva con cada token nuevo (a los pocos minutos de abrir la app), y
+  // eso disparaba una recarga completa que pisaba lo recién guardado —un
+  // cliente creado justo entonces desaparecía de la pantalla—.
+  const usuarioId = sesion?.user?.id ?? null;
+
   // Resolver la organización del usuario autenticado
   useEffect(() => {
-    if (!sesion?.user) return;
+    if (!usuarioId) return;
 
     let vigente = true;
     (async () => {
@@ -125,14 +131,14 @@ export function App() {
     return () => {
       vigente = false;
     };
-  }, [sesion, avisarError]);
+  }, [usuarioId, avisarError]);
 
   // -------------------------------------------------------------------
   // Carga de datos
   // -------------------------------------------------------------------
   const recargarTodo = useCallback(
     async (mostrarCargando = true) => {
-      if (!sesion?.user) return;
+      if (!usuarioId) return;
       if (mostrarCargando) setCargandoDatos(true);
 
       try {
@@ -179,24 +185,24 @@ export function App() {
         if (mostrarCargando) setCargandoDatos(false);
       }
     },
-    [sesion, avisarError]
+    [usuarioId, avisarError]
   );
 
   useEffect(() => {
-    if (estadoSesion !== 'listo' || !sesion?.user) return;
+    if (estadoSesion !== 'listo' || !usuarioId) return;
 
     // Pintar de inmediato lo que haya en caché mientras llega el servidor
-    const cache = leerCache(sesion.user.id);
+    const cache = leerCache(usuarioId);
     if (cache) setState(cache);
 
     void recargarTodo(!cache);
-  }, [estadoSesion, sesion, recargarTodo]);
+  }, [estadoSesion, usuarioId, recargarTodo]);
 
   // Caché local (sólo lectura rápida; la fuente de verdad es el servidor)
   useEffect(() => {
-    if (estadoSesion !== 'listo' || !sesion?.user) return;
-    guardarCache(sesion.user.id, state);
-  }, [state, estadoSesion, sesion]);
+    if (estadoSesion !== 'listo' || !usuarioId) return;
+    guardarCache(usuarioId, state);
+  }, [state, estadoSesion, usuarioId]);
 
   /**
    * Vuelve a leer el libro de saldo a favor de un cliente tras una operación

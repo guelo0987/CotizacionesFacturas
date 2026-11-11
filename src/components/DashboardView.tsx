@@ -1,7 +1,8 @@
 import React, { useMemo } from 'react';
 import type { AppState, TabType } from '../types';
 import type { SolicitudApertura } from '../App';
-import { formatCurrency } from '../utils/sanitizer';
+import { formatCurrency, hoyLocal } from '../utils/sanitizer';
+import { calcularCuadre } from '../utils/cuadre';
 import {
   Wallet,
   FileCheck,
@@ -12,19 +13,25 @@ import {
   AlertTriangle,
   FileText,
   CheckCircle2,
+  Calculator,
 } from 'lucide-react';
 
 interface DashboardViewProps {
   state: AppState;
   onNavigateTab: (tab: TabType) => void;
   onAbrirFormulario: (destino: SolicitudApertura['destino']) => void;
+  onAbrirCuadre: () => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
   state,
   onNavigateTab,
   onAbrirFormulario,
+  onAbrirCuadre,
 }) => {
+  // Lo recogido hoy, a la vista nada más abrir la aplicación
+  const hoy = useMemo(() => calcularCuadre(state, hoyLocal()), [state]);
+
   const metricas = useMemo(() => {
     const totalPorCobrar = state.facturas.reduce((acc, f) => acc + (f.saldo_pendiente || 0), 0);
     const facturasPendientes = state.facturas.filter((f) => f.saldo_pendiente > 0).length;
@@ -82,6 +89,24 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </p>
         </div>
       </div>
+
+      <button
+        onClick={onAbrirCuadre}
+        className="w-full text-left bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl p-5 flex items-center gap-4 transition-colors shadow-sm"
+      >
+        <div className="w-12 h-12 rounded-xl bg-white/15 flex items-center justify-center shrink-0">
+          <Calculator className="w-6 h-6" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-bold uppercase tracking-wider text-emerald-100">Recogido hoy</p>
+          <p className="text-2xl font-black tabular-nums">{formatCurrency(hoy.entradas.total)}</p>
+          <p className="text-xs text-emerald-100">
+            {hoy.cobros} {hoy.cobros === 1 ? 'cobro' : 'cobros'}
+            {hoy.salidas.total > 0 ? ` · salidas ${formatCurrency(hoy.salidas.total)}` : ''} · ver cuadre del día
+          </p>
+        </div>
+        <ArrowRight className="w-5 h-5 shrink-0" />
+      </button>
 
       {/* Aviso de morosidad: sólo aparece cuando hay algo que atender */}
       {metricas.cuotasAtrasadas > 0 ? (

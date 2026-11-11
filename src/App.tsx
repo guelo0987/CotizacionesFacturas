@@ -39,6 +39,11 @@ const PdfModal = lazy(() =>
   import('./components/PdfModal').then((module) => ({ default: module.PdfModal }))
 );
 
+// Diferido como las demás vistas previas: arrastra la librería de PDF
+const CuadreModal = lazy(() =>
+  import('./components/CuadreModal').then((module) => ({ default: module.CuadreModal }))
+);
+
 /** Señal para que una vista abra su formulario de alta al llegar desde el panel. */
 export interface SolicitudApertura {
   destino: 'cotizacion' | 'factura' | 'prestamo' | 'cliente';
@@ -67,6 +72,7 @@ export function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isTutorialOpen, setIsTutorialOpen] = useState(false);
   const [isReportesOpen, setIsReportesOpen] = useState(false);
+  const [isCuadreOpen, setIsCuadreOpen] = useState(false);
   const [solicitud, setSolicitud] = useState<SolicitudApertura | null>(null);
   const [pdfPreviewData, setPdfPreviewData] = useState<{
     type: 'cotizacion' | 'factura';
@@ -804,6 +810,7 @@ export function App() {
             state={state}
             onNavigateTab={setActiveTab}
             onAbrirFormulario={abrirFormulario}
+            onAbrirCuadre={() => setIsCuadreOpen(true)}
           />
         ) : null}
 
@@ -861,7 +868,26 @@ export function App() {
       ) : null}
 
       {isReportesOpen ? (
-        <ReportesModal state={state} onClose={() => setIsReportesOpen(false)} />
+        <ReportesModal
+          state={state}
+          onClose={() => setIsReportesOpen(false)}
+          onAbrirCuadre={() => {
+            setIsReportesOpen(false);
+            setIsCuadreOpen(true);
+          }}
+        />
+      ) : null}
+
+      {isCuadreOpen ? (
+        <Suspense
+          fallback={
+            <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-md flex items-center justify-center text-white text-sm font-semibold">
+              Preparando el cuadre…
+            </div>
+          }
+        >
+          <CuadreModal state={state} onClose={() => setIsCuadreOpen(false)} />
+        </Suspense>
       ) : null}
 
       <TutorialModal isOpen={isTutorialOpen} onClose={() => setIsTutorialOpen(false)} />

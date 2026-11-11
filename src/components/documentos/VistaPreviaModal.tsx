@@ -31,6 +31,8 @@ interface VistaPreviaModalProps {
   /** Mensaje que acompaña al PDF al compartirlo. */
   textoWhatsapp: string;
   telefono?: string | null;
+  /** Controles propios del documento (p. ej. la fecha del cuadre); no se imprimen. */
+  controles?: React.ReactNode;
   onClose: () => void;
   children: (contexto: ContextoDocumento) => React.ReactNode;
 }
@@ -51,6 +53,7 @@ export const VistaPreviaModal: React.FC<VistaPreviaModalProps> = ({
   tituloCompartir,
   textoWhatsapp,
   telefono,
+  controles,
   onClose,
   children,
 }) => {
@@ -158,6 +161,8 @@ export const VistaPreviaModal: React.FC<VistaPreviaModalProps> = ({
             </button>
           </div>
         </div>
+
+        {controles ? <div className="no-print">{controles}</div> : null}
 
         {/* Formato de papel. La vista previa cambia con él, así que lo que
             se ve en pantalla es exactamente lo que sale por la impresora. */}

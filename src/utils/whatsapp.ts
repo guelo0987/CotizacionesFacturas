@@ -10,7 +10,8 @@ import type {
 } from '../types';
 import { formatCurrency, formatDate } from './sanitizer';
 import { telefonoParaWhatsapp } from './validacion';
-import { estadoTrasPago } from './documentosPrestamo';
+import { METODOS_PAGO, estadoTrasPago } from './documentosPrestamo';
+import { fechaLarga, type Cuadre } from './cuadre';
 
 export function construirUrl(mensaje: string, telefono?: string | null): string {
   const encoded = encodeURIComponent(mensaje);
@@ -237,4 +238,36 @@ export function generateWhatsappLoanCuotaUrl(
   msg += `Por favor coordinar su pago a la brevedad. ¡Gracias!`;
 
   return construirUrl(msg, cliente?.telefono);
+}
+
+/** Resumen del cuadre del día, para mandarlo junto con su PDF. */
+export function mensajeCuadre(cuadre: Cuadre, settings?: BusinessSettings): string {
+  const businessName = settings?.business_name || 'Nuestro negocio';
+  const { entradas, salidas } = cuadre;
+
+  let msg = `*Cuadre del día — ${businessName}*\n`;
+  msg += `📅 ${fechaLarga(cuadre.dia)}\n\n`;
+  msg += `💵 *Total recogido:* ${formatCurrency(entradas.total)} (${cuadre.cobros} ${cuadre.cobros === 1 ? 'cobro' : 'cobros'})\n`;
+  msg += `   · Cuotas: ${formatCurrency(entradas.prestamos)}`;
+  msg += entradas.mora > 0 ? ` (mora ${formatCurrency(entradas.mora)})\n` : '\n';
+  msg += `   · Facturas: ${formatCurrency(entradas.facturas)}\n`;
+  if (entradas.anticipos > 0) msg += `   · Anticipos: ${formatCurrency(entradas.anticipos)}\n`;
+  if (salidas.total > 0) {
+    msg += `↩️ *Salidas:* ${formatCurrency(salidas.total)}\n`;
+    if (salidas.prestamosEntregados > 0) {
+      msg += `   · Préstamos entregados: ${formatCurrency(salidas.prestamosEntregados)}\n`;
+    }
+    if (salidas.devoluciones > 0) msg += `   · Devoluciones: ${formatCurrency(salidas.devoluciones)}\n`;
+  }
+  msg += `📊 *Neto del día:* ${formatCurrency(cuadre.neto)}\n\n`;
+  msg += `*Por método:*\n`;
+  for (const fila of cuadre.porMetodo) {
+    if (fila.entradas === 0 && fila.salidas === 0) continue;
+    msg += `   · ${METODOS_PAGO[fila.metodo] ?? fila.metodo}: ${formatCurrency(fila.neto)}\n`;
+  }
+  if (cuadre.creditoUsado > 0) {
+    msg += `\n💳 Pagado con saldo a favor (no es dinero nuevo): ${formatCurrency(cuadre.creditoUsado)}\n`;
+  }
+
+  return msg;
 }

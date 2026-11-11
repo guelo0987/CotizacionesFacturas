@@ -7,11 +7,12 @@ import { MODALIDADES, modalidadSegura } from '../utils/calculos';
 import { useFeedback } from './feedback/contexto';
 import { TIPOS_MOVIMIENTO, aplicadoDePago, libroCliente, saldosPorCliente } from '../utils/creditos';
 import { METODOS_PAGO } from '../utils/documentosPrestamo';
-import { Download, FileSpreadsheet, X } from 'lucide-react';
+import { Calculator, Download, FileSpreadsheet, X } from 'lucide-react';
 
 interface ReportesModalProps {
   state: AppState;
   onClose: () => void;
+  onAbrirCuadre: () => void;
 }
 
 const primerDiaDelMes = () => `${hoyLocal().slice(0, 8)}01`;
@@ -26,7 +27,7 @@ const dentroDelRango = (fecha: string | null | undefined, desde: string, hasta: 
   return dia >= desde && dia <= hasta;
 };
 
-export const ReportesModal: React.FC<ReportesModalProps> = ({ state, onClose }) => {
+export const ReportesModal: React.FC<ReportesModalProps> = ({ state, onClose, onAbrirCuadre }) => {
   const { exito, error: avisarError } = useFeedback();
   const [desde, setDesde] = useState(primerDiaDelMes());
   const [hasta, setHasta] = useState(hoyLocal());
@@ -263,6 +264,19 @@ export const ReportesModal: React.FC<ReportesModalProps> = ({ state, onClose }) 
         </div>
 
         <div className="overflow-y-auto pr-1 flex-1 space-y-5">
+          <button
+            onClick={onAbrirCuadre}
+            className="w-full flex items-center justify-between gap-3 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-2xl px-4 py-3 text-left transition-colors"
+          >
+            <div>
+              <span className="block text-sm font-bold text-emerald-900">Cuadre del día</span>
+              <span className="block text-xs text-emerald-800/80">
+                Cuánto dinero entró y salió en un día, por método de pago. Para imprimir o enviar.
+              </span>
+            </div>
+            <Calculator className="w-5 h-5 text-emerald-700 shrink-0" />
+          </button>
+
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label htmlFor="rep-desde" className="block text-sm font-bold text-slate-700 mb-1">

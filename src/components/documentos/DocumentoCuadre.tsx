@@ -1,6 +1,6 @@
 import React from 'react';
 import type { BusinessSettings } from '../../types';
-import { formatCurrency } from '../../utils/sanitizer';
+import { ZONA_NEGOCIO, formatCurrency } from '../../utils/sanitizer';
 import type { FormatoImpresion } from '../../utils/formatosImpresion';
 import {
   CabeceraTermica,
@@ -30,6 +30,7 @@ function generadoAhora(): string {
     year: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
+    timeZone: ZONA_NEGOCIO,
   }).format(new Date());
 }
 

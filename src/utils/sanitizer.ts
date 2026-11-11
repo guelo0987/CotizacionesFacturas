@@ -42,7 +42,14 @@ export function formatCurrency(amount: number | string | undefined | null): stri
  * «2026-09-22T01:30:00+00:00» es todavía el 21, a las 9:30 p. m., en Santo
  * Domingo. Quedarse con lo que va antes de la «T» daría el día siguiente.
  */
-export function diaLocal(valor: string, zonaHoraria?: string): string {
+/**
+ * Zona horaria del negocio. Es la misma con la que el servidor decide qué
+ * día es hoy (`hoy_negocio()`): así el día no depende de cómo tenga
+ * configurada la hora cada teléfono.
+ */
+export const ZONA_NEGOCIO = 'America/Santo_Domingo';
+
+export function diaLocal(valor: string, zonaHoraria: string = ZONA_NEGOCIO): string {
   const texto = String(valor ?? '').trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(texto)) return texto;
   if (!/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(texto)) return texto.split('T')[0];
@@ -142,9 +149,9 @@ export function estaVencida(fecha: string | null | undefined): boolean {
   if (partes.length !== 3) return false;
 
   const vencimiento = new Date(Date.UTC(Number(partes[0]), Number(partes[1]) - 1, Number(partes[2])));
-  const hoy = new Date();
-  const hoyUTC = new Date(Date.UTC(hoy.getFullYear(), hoy.getMonth(), hoy.getDate()));
-  return vencimiento.getTime() < hoyUTC.getTime();
+  // «Hoy» es el del negocio, no el que marque el teléfono
+  const [a, m, d] = hoyLocal().split('-').map(Number);
+  return vencimiento.getTime() < Date.UTC(a, m - 1, d);
 }
 
 export { redondearDinero };

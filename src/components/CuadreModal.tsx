@@ -1,17 +1,19 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type { AppState } from '../types';
 import { VistaPreviaModal } from './documentos/VistaPreviaModal';
 import { CuadreA4, CuadreTermico } from './documentos/DocumentoCuadre';
 import { calcularCuadre, fechaLarga, horaDe, moverDia } from '../utils/cuadre';
-import { formatCurrency, formatDate, hoyLocal } from '../utils/sanitizer';
+import { ZONA_NEGOCIO, formatCurrency, formatDate, hoyLocal } from '../utils/sanitizer';
 import { mensajeCuadre } from '../utils/whatsapp';
 import { descargarCSV, generarCSV } from '../utils/exportar';
 import { METODOS_PAGO } from '../utils/documentosPrestamo';
 import { useFeedback } from './feedback/contexto';
-import { ChevronLeft, ChevronRight, FileSpreadsheet } from 'lucide-react';
+import { ChevronLeft, ChevronRight, FileSpreadsheet, RefreshCw } from 'lucide-react';
 
 interface CuadreModalProps {
   state: AppState;
+  /** Vuelve a leer todo del servidor. */
+  onActualizar: () => Promise<void>;
   onClose: () => void;
 }
 
@@ -19,11 +21,31 @@ interface CuadreModalProps {
  * Cuadre del día: cuánto dinero entró y salió en una fecha, listo para
  * imprimir en hoja o en rollo, mandar por WhatsApp o bajar a Excel.
  */
-export const CuadreModal: React.FC<CuadreModalProps> = ({ state, onClose }) => {
+export const CuadreModal: React.FC<CuadreModalProps> = ({ state, onActualizar, onClose }) => {
   const { exito, error: avisarError } = useFeedback();
   const hoy = hoyLocal();
   const [dia, setDia] = useState(hoy);
   const cuadre = useMemo(() => calcularCuadre(state, dia), [state, dia]);
+
+  // Al abrirlo se leen los datos del servidor: lo que cobraron otros
+  // teléfonos desde que se abrió la aplicación tiene que estar en el cuadre
+  const [actualizando, setActualizando] = useState(false);
+  const [actualizadoA, setActualizadoA] = useState<string | null>(null);
+  const actualizar = useCallback(async () => {
+    setActualizando(true);
+    try {
+      await onActualizar();
+      setActualizadoA(
+        new Intl.DateTimeFormat('es-DO', { hour: 'numeric', minute: '2-digit', timeZone: ZONA_NEGOCIO }).format(new Date())
+      );
+    } finally {
+      setActualizando(false);
+    }
+  }, [onActualizar]);
+
+  // Sólo al abrir: `onActualizar` cambia de identidad en cada render
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => void actualizar(), []);
 
   const exportar = () => {
     try {
@@ -81,6 +103,10 @@ export const CuadreModal: React.FC<CuadreModalProps> = ({ state, onClose }) => {
       ) : null}
       <button className={boton} onClick={exportar} disabled={cuadre.renglones.length === 0}>
         <FileSpreadsheet className="w-4 h-4 text-emerald-600" /> Excel
+      </button>
+      <button className={boton} onClick={() => void actualizar()} disabled={actualizando}>
+        <RefreshCw className={`w-4 h-4 ${actualizando ? 'animate-spin' : ''}`} />
+        {actualizando ? 'Actualizando…' : actualizadoA ? `Al día · ${actualizadoA}` : 'Actualizar'}
       </button>
       <span className="text-xs text-slate-600 ml-auto">
         Recogido <strong className="text-emerald-700">{formatCurrency(cuadre.entradas.total)}</strong> · Neto{' '}

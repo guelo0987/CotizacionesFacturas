@@ -886,7 +886,11 @@ export function App() {
             </div>
           }
         >
-          <CuadreModal state={state} onClose={() => setIsCuadreOpen(false)} />
+          <CuadreModal
+            state={state}
+            onActualizar={() => recargarTodo(false)}
+            onClose={() => setIsCuadreOpen(false)}
+          />
         </Suspense>
       ) : null}
 

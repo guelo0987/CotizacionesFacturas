@@ -1,5 +1,5 @@
 import type { AppState, MetodoCobro, MetodoPago } from '../types';
-import { diaLocal } from './sanitizer';
+import { ZONA_NEGOCIO, diaLocal } from './sanitizer';
 import { redondearDinero } from './validacion';
 import { referenciaPrestamo } from './documentosPrestamo';
 
@@ -80,7 +80,7 @@ export const METODOS_CUADRE: MetodoCobro[] = ['efectivo', 'transferencia', 'tarj
 
 const suma = (valores: number[]) => redondearDinero(valores.reduce((a, v) => a + (Number(v) || 0), 0));
 
-export function calcularCuadre(datos: DatosCuadre, dia: string, zonaHoraria?: string): Cuadre {
+export function calcularCuadre(datos: DatosCuadre, dia: string, zonaHoraria: string = ZONA_NEGOCIO): Cuadre {
   const delDia = (fecha: string | null | undefined) => !!fecha && diaLocal(fecha, zonaHoraria) === dia;
   const nombreCliente = (id: string | null | undefined) =>
     datos.clientes.find((c) => c.id === id)?.nombre ?? 'Cliente sin asignar';
@@ -252,7 +252,7 @@ export function calcularCuadre(datos: DatosCuadre, dia: string, zonaHoraria?: st
 }
 
 /** Hora local de un movimiento («3:45 p. m.»); vacía si sólo se conoce el día. */
-export function horaDe(fecha: string, zonaHoraria?: string): string {
+export function horaDe(fecha: string, zonaHoraria: string = ZONA_NEGOCIO): string {
   if (!/T\d{2}:\d{2}/.test(fecha) || /T00:00:00$/.test(fecha)) return '';
   const momento = new Date(fecha);
   if (Number.isNaN(momento.getTime())) return '';

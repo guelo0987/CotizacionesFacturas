@@ -1,3 +1,5 @@
+import { hoyLocal } from './sanitizer';
+
 /**
  * Exportación a CSV compatible con Excel.
  */
@@ -57,12 +59,8 @@ export function descargarCSV(nombreArchivo: string, contenido: string): void {
 
 /** Nombre de archivo con marca temporal, seguro para cualquier sistema. */
 export function nombreConFecha(base: string): string {
-  const ahora = new Date();
-  const sello = [
-    ahora.getFullYear(),
-    String(ahora.getMonth() + 1).padStart(2, '0'),
-    String(ahora.getDate()).padStart(2, '0'),
-  ].join('-');
+  // El día del negocio, no el que marque el teléfono
+  const sello = hoyLocal();
   const limpio = base.replace(/[^\p{L}\p{N}_-]/gu, '_');
   return `${limpio}_${sello}.csv`;
 }

@@ -70,6 +70,47 @@ function lanzarSiFalla<T>(
   return respuesta.data;
 }
 
+/** Filas por petición: Supabase no entrega más de 1,000 de una vez. */
+const TANDA = 1000;
+
+type PaginaConsulta<T> = PromiseLike<{
+  data: T[] | null;
+  error: PostgrestError | null;
+  count?: number | null;
+}>;
+
+/**
+ * Trae TODAS las filas de una consulta, por tandas.
+ *
+ * Supabase corta cada respuesta en 1,000 filas sin avisar: pasado ese
+ * número, los pagos más viejos dejaban de llegar y el cuadre de días
+ * pasados y los reportes salían cortos. Se pide el conteo exacto y se
+ * siguen pidiendo tandas hasta tenerlas todas, sea cual sea el tamaño de
+ * página que permita el servidor. La consulta debe ir en un orden estable
+ * (alta + id); si alguien guarda algo mientras se lee, se quitan duplicados.
+ */
+export async function traerTodo<T extends { id: string }>(
+  pedir: (desde: number, hasta: number) => PaginaConsulta<T>,
+  accion: string
+): Promise<T[]> {
+  const porId = new Map<string, T>();
+  let leidas = 0;
+
+  for (;;) {
+    const { data, error, count } = await pedir(leidas, leidas + TANDA - 1);
+    if (error) throw traducir(error, accion);
+
+    const lote = data ?? [];
+    for (const fila of lote) porId.set(fila.id, fila);
+    leidas += lote.length;
+
+    const completo = typeof count === 'number' ? leidas >= count : lote.length < TANDA;
+    if (lote.length === 0 || completo) return [...porId.values()];
+  }
+}
+
+const porAltaDescendente = <T extends { created_at?: string | null }>(filas: T[]) => filas.reverse();
+
 /** Normaliza las líneas antes de enviarlas: sin ids locales ni campos calculados. */
 function normalizarLineas(items: LineaDocumento[] | undefined) {
   return (items ?? []).map((it) => ({
@@ -217,10 +258,17 @@ export const supabaseDataService = {
 
   async fetchClientes(): Promise<Cliente[]> {
     const supabase = requireSupabaseClient();
-    return lanzarSiFalla(
-      await supabase.from('clientes').select('*').order('nombre', { ascending: true }),
+    const filas = await traerTodo<Cliente>(
+      (desde, hasta) =>
+        supabase
+          .from('clientes')
+          .select('*', { count: 'exact' })
+          .order('created_at', { ascending: true })
+          .order('id', { ascending: true })
+          .range(desde, hasta),
       'cargar los clientes'
-    ) as Cliente[];
+    );
+    return filas.sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
   },
 
   async createCliente(cliente: Omit<Cliente, 'id' | 'created_at' | 'activo'>): Promise<Cliente> {
@@ -274,10 +322,17 @@ export const supabaseDataService = {
 
   async fetchServicios(): Promise<Servicio[]> {
     const supabase = requireSupabaseClient();
-    return lanzarSiFalla(
-      await supabase.from('servicios').select('*').order('nombre', { ascending: true }),
+    const filas = await traerTodo<Servicio>(
+      (desde, hasta) =>
+        supabase
+          .from('servicios')
+          .select('*', { count: 'exact' })
+          .order('created_at', { ascending: true })
+          .order('id', { ascending: true })
+          .range(desde, hasta),
       'cargar el catálogo de servicios'
-    ) as Servicio[];
+    );
+    return filas.sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
   },
 
   async createServicio(servicio: Omit<Servicio, 'id' | 'created_at'>): Promise<Servicio> {
@@ -309,14 +364,17 @@ export const supabaseDataService = {
 
   async fetchCotizaciones(): Promise<Cotizacion[]> {
     const supabase = requireSupabaseClient();
-    const data = lanzarSiFalla(
-      await supabase
-        .from('cotizaciones')
-        .select('*, items:cotizacion_items(*)')
-        .order('created_at', { ascending: false }),
+    const filas = await traerTodo<Cotizacion>(
+      (desde, hasta) =>
+        supabase
+          .from('cotizaciones')
+          .select('*, items:cotizacion_items(*)', { count: 'exact' })
+          .order('created_at', { ascending: true })
+          .order('id', { ascending: true })
+          .range(desde, hasta),
       'cargar las cotizaciones'
     );
-    return (data ?? []) as Cotizacion[];
+    return porAltaDescendente(filas);
   },
 
   /**
@@ -373,14 +431,17 @@ export const supabaseDataService = {
 
   async fetchFacturas(): Promise<Factura[]> {
     const supabase = requireSupabaseClient();
-    const data = lanzarSiFalla(
-      await supabase
-        .from('facturas')
-        .select('*, items:factura_items(*), pagos:pagos(*)')
-        .order('created_at', { ascending: false }),
+    const filas = await traerTodo<Factura>(
+      (desde, hasta) =>
+        supabase
+          .from('facturas')
+          .select('*, items:factura_items(*), pagos:pagos(*)', { count: 'exact' })
+          .order('created_at', { ascending: true })
+          .order('id', { ascending: true })
+          .range(desde, hasta),
       'cargar las facturas'
     );
-    return (data ?? []) as Factura[];
+    return porAltaDescendente(filas);
   },
 
   async guardarFactura(
@@ -441,16 +502,19 @@ export const supabaseDataService = {
 
   async fetchPrestamos(): Promise<Prestamo[]> {
     const supabase = requireSupabaseClient();
-    const data = lanzarSiFalla(
-      await supabase
-        .from('prestamos')
-        .select('*, cuotas:cuotas(*), pagos:pagos(*)')
-        .order('created_at', { ascending: false }),
+    const filas = await traerTodo<Prestamo>(
+      (desde, hasta) =>
+        supabase
+          .from('prestamos')
+          .select('*, cuotas:cuotas(*), pagos:pagos(*)', { count: 'exact' })
+          .order('created_at', { ascending: true })
+          .order('id', { ascending: true })
+          .range(desde, hasta),
       'cargar los préstamos'
     );
 
     // Las cuotas deben venir siempre en orden de vencimiento
-    return ((data ?? []) as Prestamo[]).map((p) => ({
+    return porAltaDescendente(filas).map((p) => ({
       ...p,
       cuotas: [...(p.cuotas ?? [])].sort((a, b) => a.numero - b.numero),
     }));
@@ -576,13 +640,14 @@ export const supabaseDataService = {
 
   async fetchMovimientosCredito(clienteId?: string): Promise<MovimientoCredito[]> {
     const supabase = requireSupabaseClient();
-    let consulta = supabase
-      .from('movimientos_credito')
-      .select('*')
-      .order('fecha', { ascending: true })
-      .order('id', { ascending: true });
-    if (clienteId) consulta = consulta.eq('cliente_id', clienteId);
-    return lanzarSiFalla(await consulta, 'cargar el saldo a favor') as MovimientoCredito[];
+    return traerTodo<MovimientoCredito>((desde, hasta) => {
+      let consulta = supabase.from('movimientos_credito').select('*', { count: 'exact' });
+      if (clienteId) consulta = consulta.eq('cliente_id', clienteId);
+      return consulta
+        .order('fecha', { ascending: true })
+        .order('id', { ascending: true })
+        .range(desde, hasta);
+    }, 'cargar el saldo a favor');
   },
 
   /** Dinero que el cliente deja a su favor sin deber nada en ese momento. */
@@ -633,9 +698,17 @@ export const supabaseDataService = {
 
   async fetchPagos(): Promise<Pago[]> {
     const supabase = requireSupabaseClient();
-    return lanzarSiFalla(
-      await supabase.from('pagos').select('*').order('fecha', { ascending: false }),
+    const filas = await traerTodo<Pago>(
+      (desde, hasta) =>
+        supabase
+          .from('pagos')
+          .select('*', { count: 'exact' })
+          .order('created_at', { ascending: true })
+          .order('id', { ascending: true })
+          .range(desde, hasta),
       'cargar los pagos'
-    ) as Pago[];
+    );
+    // Del más reciente al más antiguo, como siempre
+    return filas.sort((a, b) => Date.parse(b.fecha) - Date.parse(a.fecha));
   },
 };

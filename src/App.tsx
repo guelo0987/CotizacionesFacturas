@@ -6,6 +6,7 @@ import type {
   Cliente,
   Cotizacion,
   Factura,
+  LadoCedula,
   LineaDocumento,
   MetodoCobro,
   MetodoPago,
@@ -20,7 +21,9 @@ import { ESTADO_VACIO, guardarCache, leerCache, limpiarCache } from './services/
 import { configuracionCompleta, getSupabaseClient } from './services/supabaseClient';
 import { supabaseDataService } from './services/supabaseDataService';
 import { calcularPrestamo, modalidadSegura } from './utils/calculos';
-import { formatCurrency } from './utils/sanitizer';
+import { formatCurrency, hoyLocal } from './utils/sanitizer';
+import { avisosUrgentes, clientesPorCobrar } from './utils/cobros';
+import { reducirFoto } from './utils/imagen';
 import { useFeedback, mensajeDeError } from './components/feedback/contexto';
 import { Header } from './components/Header';
 import { BottomNav } from './components/BottomNav';
@@ -34,6 +37,7 @@ import { OnboardingView } from './components/OnboardingView';
 import { ConfiguracionFaltanteView } from './components/ConfiguracionFaltanteView';
 import { TutorialModal } from './components/TutorialModal';
 import { ReportesModal } from './components/ReportesModal';
+import { CobrosPanel } from './components/CobrosPanel';
 
 const PdfModal = lazy(() =>
   import('./components/PdfModal').then((module) => ({ default: module.PdfModal }))
@@ -46,7 +50,9 @@ const CuadreModal = lazy(() =>
 
 /** Señal para que una vista abra su formulario de alta al llegar desde el panel. */
 export interface SolicitudApertura {
-  destino: 'cotizacion' | 'factura' | 'prestamo' | 'cliente';
+  destino: 'cotizacion' | 'factura' | 'prestamo' | 'cliente' | 'ver-prestamo';
+  /** Con `ver-prestamo`: cuál abrir. */
+  prestamoId?: string;
   nonce: number;
 }
 
@@ -73,6 +79,7 @@ export function App() {
   const [isTutorialOpen, setIsTutorialOpen] = useState(false);
   const [isReportesOpen, setIsReportesOpen] = useState(false);
   const [isCuadreOpen, setIsCuadreOpen] = useState(false);
+  const [isCobrosOpen, setIsCobrosOpen] = useState(false);
   const [solicitud, setSolicitud] = useState<SolicitudApertura | null>(null);
   const [pdfPreviewData, setPdfPreviewData] = useState<{
     type: 'cotizacion' | 'factura';
@@ -297,6 +304,25 @@ export function App() {
     exito('Cliente actualizado.');
   };
 
+  const reemplazarCliente = (actualizado: Cliente) =>
+    setState((prev) => ({
+      ...prev,
+      clientes: prev.clientes.map((c) => (c.id === actualizado.id ? actualizado : c)),
+    }));
+
+  const handleSubirFoto = async (cliente: Cliente, lado: LadoCedula, archivo: File) => {
+    if (!organizacionId) throw new Error('No se pudo identificar tu negocio.');
+    // Se reduce en el teléfono: sube en segundos aunque sea con datos
+    const foto = await reducirFoto(archivo);
+    reemplazarCliente(await supabaseDataService.subirFotoCliente(organizacionId, cliente, lado, foto));
+    exito('Foto guardada.');
+  };
+
+  const handleQuitarFoto = async (cliente: Cliente, lado: LadoCedula) => {
+    reemplazarCliente(await supabaseDataService.quitarFotoCliente(cliente, lado));
+    exito('Foto quitada.');
+  };
+
   const handleDeleteCliente = async (id: string) => {
     const cliente = clienteMap.get(id);
     const historial = await supabaseDataService.contarHistorialCliente(id);
@@ -334,6 +360,11 @@ export function App() {
 
     const resultado = await supabaseDataService.deleteCliente(id);
     if (resultado === 'eliminado') {
+      // Borrado del todo: sus fotos ya no le sirven a nadie. Si fallara,
+      // el cliente ya está borrado y no se le avisa de algo que no puede arreglar.
+      await supabaseDataService
+        .borrarFotos([cliente?.foto_cedula_frente, cliente?.foto_cedula_detras])
+        .catch(() => undefined);
       setState((prev) => ({ ...prev, clientes: prev.clientes.filter((c) => c.id !== id) }));
       exito('Cliente eliminado.');
     } else {
@@ -752,6 +783,19 @@ export function App() {
   // -------------------------------------------------------------------
   // Navegación desde las acciones rápidas del panel
   // -------------------------------------------------------------------
+  // Campanita: a quién hay que cobrarle. «Hoy» es el de Santo Domingo.
+  const porCobrar = useMemo(
+    () => clientesPorCobrar({ prestamos: state.prestamos, clientes: state.clientes }, hoyLocal()),
+    [state.prestamos, state.clientes]
+  );
+  const urgentes = avisosUrgentes(porCobrar);
+
+  const verPrestamo = (prestamoId: string) => {
+    setIsCobrosOpen(false);
+    setActiveTab('prestamos');
+    setSolicitud({ destino: 'ver-prestamo', prestamoId, nonce: Date.now() });
+  };
+
   const abrirFormulario = (destino: SolicitudApertura['destino']) => {
     setActiveTab(
       destino === 'cliente' ? 'clientes' : destino === 'prestamo' ? 'prestamos' : 'documentos'
@@ -795,6 +839,8 @@ export function App() {
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenTutorial={() => setIsTutorialOpen(true)}
         onOpenReportes={() => setIsReportesOpen(true)}
+        onOpenCobros={() => setIsCobrosOpen(true)}
+        avisos={urgentes}
         onLogout={handleLogout}
       />
 
@@ -823,6 +869,8 @@ export function App() {
             onDeleteCliente={handleDeleteCliente}
             onRegistrarAnticipo={handleRegistrarAnticipo}
             onDevolverSaldo={handleDevolverSaldo}
+            onSubirFoto={handleSubirFoto}
+            onQuitarFoto={handleQuitarFoto}
           />
         ) : null}
 
@@ -875,6 +923,15 @@ export function App() {
             setIsReportesOpen(false);
             setIsCuadreOpen(true);
           }}
+        />
+      ) : null}
+
+      {isCobrosOpen ? (
+        <CobrosPanel
+          state={state}
+          clientes={porCobrar}
+          onVerPrestamo={verPrestamo}
+          onClose={() => setIsCobrosOpen(false)}
         />
       ) : null}
 

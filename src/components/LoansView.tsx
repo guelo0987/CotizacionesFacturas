@@ -215,6 +215,10 @@ export const LoansView: React.FC<LoansViewProps> = ({
 
   useEffect(() => {
     if (solicitud?.destino === 'prestamo') abrirCreacion();
+    // Desde la campanita: abrir la ficha del préstamo
+    if (solicitud?.destino === 'ver-prestamo' && solicitud.prestamoId) {
+      setSelectedPrestamoId(solicitud.prestamoId);
+    }
   }, [solicitud, abrirCreacion]);
 
   const abrirEdicion = (prestamo: Prestamo) => {

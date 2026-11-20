@@ -1,12 +1,15 @@
 import React from 'react';
 import type { BusinessSettings } from '../types';
-import { Settings, HelpCircle, LogOut, Building2, FileSpreadsheet } from 'lucide-react';
+import { Settings, HelpCircle, LogOut, Building2, FileSpreadsheet, Bell } from 'lucide-react';
 
 interface HeaderProps {
   settings: BusinessSettings;
   onOpenSettings: () => void;
   onOpenTutorial: () => void;
   onOpenReportes: () => void;
+  onOpenCobros: () => void;
+  /** Clientes atrasados o que pagan hoy: el número de la campanita. */
+  avisos: number;
   onLogout: () => void;
 }
 
@@ -15,6 +18,8 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenSettings,
   onOpenTutorial,
   onOpenReportes,
+  onOpenCobros,
+  avisos,
   onLogout,
 }) => {
   const [logoRoto, setLogoRoto] = React.useState(false);
@@ -22,23 +27,24 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <header className="sticky top-0 z-40 bg-white/80 backdrop-blur-md border-b border-slate-200/80 px-4 py-3 shadow-sm">
-      <div className="max-w-4xl mx-auto flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <div className="max-w-4xl mx-auto flex items-center justify-between gap-2">
+        {/* El nombre cede espacio a los botones en pantallas estrechas */}
+        <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
           {mostrarLogo ? (
             <img
               src={settings.logo_url}
               alt=""
-              className="w-10 h-10 rounded-2xl object-cover border border-slate-200 shadow-sm"
+              className="w-10 h-10 shrink-0 rounded-2xl object-cover border border-slate-200 shadow-sm"
               onError={() => setLogoRoto(true)}
             />
           ) : (
-            <div className="w-10 h-10 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center justify-center">
+            <div className="w-10 h-10 shrink-0 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center justify-center">
               <Building2 className="w-5 h-5 text-emerald-600" />
             </div>
           )}
 
-          <div>
-            <h1 className="text-sm sm:text-base font-extrabold text-slate-900 truncate max-w-[170px] sm:max-w-xs leading-tight font-heading">
+          <div className="min-w-0">
+            <h1 className="text-sm sm:text-base font-extrabold text-slate-900 truncate sm:max-w-xs leading-tight font-heading">
               {settings.business_name || 'Mi Negocio'}
             </h1>
             <p className="text-xs text-slate-500 font-medium flex items-center gap-1.5">
@@ -49,10 +55,10 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           <button
             onClick={onOpenTutorial}
-            className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-emerald-800 border border-slate-200 px-3 py-1.5 rounded-xl text-sm font-bold transition-all"
+            className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-emerald-800 border border-slate-200 px-2.5 sm:px-3 py-1.5 rounded-xl text-sm font-bold transition-all"
             title="Ver guía de uso"
           >
             <HelpCircle className="w-3.5 h-3.5 text-emerald-600" />
@@ -60,8 +66,26 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
 
           <button
+            onClick={onOpenCobros}
+            className="relative p-1.5 sm:p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-xl transition-all"
+            title="Cobros pendientes"
+            aria-label={
+              avisos > 0
+                ? `Cobros pendientes: ${avisos} ${avisos === 1 ? 'cliente' : 'clientes'} para hoy o atrasados`
+                : 'Cobros pendientes'
+            }
+          >
+            <Bell className={`w-4 h-4 ${avisos > 0 ? 'text-amber-600' : ''}`} />
+            {avisos > 0 ? (
+              <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-red-600 text-white text-[10px] font-black leading-[18px] text-center shadow">
+                {avisos > 99 ? '99+' : avisos}
+              </span>
+            ) : null}
+          </button>
+
+          <button
             onClick={onOpenReportes}
-            className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-xl transition-all"
+            className="p-1.5 sm:p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-xl transition-all"
             title="Reportes y exportación"
             aria-label="Reportes y exportación"
           >
@@ -70,7 +94,7 @@ export const Header: React.FC<HeaderProps> = ({
 
           <button
             onClick={onOpenSettings}
-            className="tour-ajustes p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-xl transition-all"
+            className="tour-ajustes p-1.5 sm:p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-xl transition-all"
             title="Ajustes del negocio"
             aria-label="Ajustes del negocio"
           >
@@ -79,7 +103,7 @@ export const Header: React.FC<HeaderProps> = ({
 
           <button
             onClick={onLogout}
-            className="p-2 bg-slate-100 hover:bg-red-50 text-slate-500 hover:text-red-600 border border-slate-200 rounded-xl transition-all"
+            className="p-1.5 sm:p-2 bg-slate-100 hover:bg-red-50 text-slate-500 hover:text-red-600 border border-slate-200 rounded-xl transition-all"
             title="Cerrar sesión"
             aria-label="Cerrar sesión"
           >

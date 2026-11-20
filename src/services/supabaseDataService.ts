@@ -3,6 +3,7 @@ import { requireSupabaseClient } from './supabaseClient';
 import type {
   BusinessSettings,
   Cliente,
+  LadoCedula,
   Cotizacion,
   Factura,
   LineaDocumento,
@@ -72,6 +73,9 @@ function lanzarSiFalla<T>(
 
 /** Filas por petición: Supabase no entrega más de 1,000 de una vez. */
 const TANDA = 1000;
+
+/** Bucket privado con las fotos de la cédula de los clientes. */
+const BUCKET_FOTOS = 'fotos-clientes';
 
 type PaginaConsulta<T> = PromiseLike<{
   data: T[] | null;
@@ -281,7 +285,15 @@ export const supabaseDataService = {
 
   async updateCliente(id: string, cambios: Partial<Cliente>): Promise<Cliente> {
     const supabase = requireSupabaseClient();
-    const { id: _omitido, created_at: _fecha, ...datos } = cambios;
+    // Las fotos van por su propio camino (`subirFotoCliente`): una ficha
+    // abierta desde antes no debe pisar la foto que se acaba de subir.
+    const {
+      id: _omitido,
+      created_at: _fecha,
+      foto_cedula_frente: _frente,
+      foto_cedula_detras: _detras,
+      ...datos
+    } = cambios;
     return lanzarSiFalla(
       await supabase.from('clientes').update(datos).eq('id', id).select().single(),
       'actualizar el cliente'
@@ -306,6 +318,82 @@ export const supabaseDataService = {
       movimientos_credito: Number(historial.movimientos_credito) || 0,
       saldo_a_favor: Number(historial.saldo_a_favor) || 0,
     };
+  },
+
+  /**
+   * Sube una foto de la cédula y la deja puesta en la ficha del cliente.
+   *
+   * Orden pensado para no perder nada: primero se sube el archivo nuevo,
+   * luego se guarda su ruta y sólo entonces se borra el anterior. Si no se
+   * puede guardar la ruta, se borra el archivo recién subido.
+   */
+  async subirFotoCliente(
+    organizacionId: string,
+    cliente: Cliente,
+    lado: LadoCedula,
+    foto: Blob
+  ): Promise<Cliente> {
+    const supabase = requireSupabaseClient();
+    const columna = lado === 'frente' ? 'foto_cedula_frente' : 'foto_cedula_detras';
+    const anterior = cliente[columna] ?? null;
+    const ruta = `${organizacionId}/${cliente.id}/${lado}-${Date.now()}.jpg`;
+
+    const { error } = await supabase.storage
+      .from(BUCKET_FOTOS)
+      .upload(ruta, foto, { contentType: 'image/jpeg', upsert: false });
+    if (error) {
+      throw new ErrorDatos(`No se pudo subir la foto. ${error.message}`, error instanceof Error ? error : undefined);
+    }
+
+    const respuesta = await supabase
+      .from('clientes')
+      .update({ [columna]: ruta })
+      .eq('id', cliente.id)
+      .select()
+      .single();
+    if (respuesta.error) {
+      await supabase.storage.from(BUCKET_FOTOS).remove([ruta]);
+      throw traducir(respuesta.error, 'guardar la foto');
+    }
+
+    if (anterior) await supabase.storage.from(BUCKET_FOTOS).remove([anterior]);
+    return respuesta.data as Cliente;
+  },
+
+  /** Quita una foto de la ficha y borra el archivo. */
+  async quitarFotoCliente(cliente: Cliente, lado: LadoCedula): Promise<Cliente> {
+    const supabase = requireSupabaseClient();
+    const columna = lado === 'frente' ? 'foto_cedula_frente' : 'foto_cedula_detras';
+    const anterior = cliente[columna] ?? null;
+
+    const actualizado = lanzarSiFalla(
+      await supabase.from('clientes').update({ [columna]: null }).eq('id', cliente.id).select().single(),
+      'quitar la foto'
+    ) as Cliente;
+
+    if (anterior) await supabase.storage.from(BUCKET_FOTOS).remove([anterior]);
+    return actualizado;
+  },
+
+  /**
+   * Enlace temporal para ver una foto. El bucket es privado: sin este
+   * enlace firmado nadie puede abrirla, y caduca a la hora.
+   */
+  async urlFotoCliente(ruta: string): Promise<string> {
+    const supabase = requireSupabaseClient();
+    const { data, error } = await supabase.storage.from(BUCKET_FOTOS).createSignedUrl(ruta, 3600);
+    if (error || !data?.signedUrl) {
+      throw new ErrorDatos('No se pudo cargar la foto.', error instanceof Error ? error : undefined);
+    }
+    return data.signedUrl;
+  },
+
+  /** Borra los archivos de fotos (al eliminar un cliente del todo). */
+  async borrarFotos(rutas: (string | null | undefined)[]): Promise<void> {
+    const supabase = requireSupabaseClient();
+    const validas = rutas.filter((r): r is string => Boolean(r));
+    if (validas.length === 0) return;
+    await supabase.storage.from(BUCKET_FOTOS).remove(validas);
   },
 
   /** Devuelve 'eliminado' o 'desactivado' según si el cliente tenía historial. */

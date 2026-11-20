@@ -70,7 +70,13 @@ export interface Cliente {
   notas: string;
   activo: boolean;
   created_at: string;
+  /** Rutas en el bucket privado `fotos-clientes`; se ven con enlace firmado. */
+  foto_cedula_frente?: string | null;
+  foto_cedula_detras?: string | null;
 }
+
+/** Cuál de las dos fotos de la cédula. */
+export type LadoCedula = 'frente' | 'detras';
 
 export interface Servicio {
   id: string;

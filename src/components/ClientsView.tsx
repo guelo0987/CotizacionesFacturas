@@ -1,5 +1,6 @@
 import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
-import type { AppState, Cliente, MetodoCobro, MovimientoCredito } from '../types';
+import type { AppState, Cliente, LadoCedula, MetodoCobro, MovimientoCredito } from '../types';
+import { FotosCedula } from './FotosCedula';
 import type { SolicitudApertura } from '../App';
 import { formatCurrency, formatDate, formatDocumento, formatTelefono } from '../utils/sanitizer';
 import {
@@ -62,6 +63,8 @@ interface ClientsViewProps {
   onDeleteCliente: (id: string) => Promise<void>;
   onRegistrarAnticipo: OperacionCredito;
   onDevolverSaldo: OperacionCredito;
+  onSubirFoto: (cliente: Cliente, lado: LadoCedula, archivo: File) => Promise<void>;
+  onQuitarFoto: (cliente: Cliente, lado: LadoCedula) => Promise<void>;
 }
 
 const METODOS_COBRO: { valor: MetodoCobro; etiqueta: string }[] = [
@@ -88,6 +91,8 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
   onDeleteCliente,
   onRegistrarAnticipo,
   onDevolverSaldo,
+  onSubirFoto,
+  onQuitarFoto,
 }) => {
   const [search, setSearch] = useState('');
   // Saldo a favor: formulario de anticipo o devolución y comprobante abierto
@@ -649,6 +654,8 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                   </div>
                 ) : null}
               </div>
+
+              <FotosCedula cliente={selectedCliente} onSubir={onSubirFoto} onQuitar={onQuitarFoto} />
 
               {/* Saldo a favor */}
               <div className="bg-sky-50/60 border border-sky-200 rounded-xl p-3 space-y-3">

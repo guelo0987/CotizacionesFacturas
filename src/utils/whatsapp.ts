@@ -10,7 +10,8 @@ import type {
 } from '../types';
 import { formatCurrency, formatDate } from './sanitizer';
 import { telefonoParaWhatsapp } from './validacion';
-import { METODOS_PAGO, estadoTrasPago } from './documentosPrestamo';
+import { METODOS_PAGO, estadoTrasPago, referenciaPrestamo } from './documentosPrestamo';
+import { textoVencimiento, type ClientePorCobrar } from './cobros';
 import { fechaLarga, type Cuadre } from './cuadre';
 
 export function construirUrl(mensaje: string, telefono?: string | null): string {
@@ -269,5 +270,38 @@ export function mensajeCuadre(cuadre: Cuadre, settings?: BusinessSettings): stri
     msg += `\n💳 Pagado con saldo a favor (no es dinero nuevo): ${formatCurrency(cuadre.creditoUsado)}\n`;
   }
 
+  return msg;
+}
+
+/**
+ * Recordatorio de cobro para un cliente con una o varias cuotas por pagar:
+ * cada cuota con su vencimiento y, si la hay, su mora; al final el total.
+ */
+export function mensajeRecordatorioCobro(
+  cliente: ClientePorCobrar,
+  settings?: BusinessSettings
+): string {
+  const negocio = settings?.business_name || 'Nuestro negocio';
+  const nombre = cliente.cliente?.nombre || 'Cliente';
+  const atrasado = cliente.diasAtraso > 0;
+
+  let msg = `*Recordatorio de pago — ${negocio}*\n\n`;
+  msg += `Hola *${nombre}*,\n`;
+  msg += atrasado
+    ? `Le recordamos que tiene pagos vencidos de su préstamo:\n\n`
+    : `Le recordamos sus próximos pagos:\n\n`;
+
+  for (const item of cliente.cuotas) {
+    msg += `🗓️ *Cuota #${item.cuota.numero}* (${referenciaPrestamo(item.prestamo)}) — ${formatDate(item.cuota.fecha_vencimiento)}`;
+    msg += ` · ${textoVencimiento(item.dias).toLowerCase()}\n`;
+    msg += `   💵 ${formatCurrency(item.restante)}`;
+    if (item.mora > 0) msg += ` + mora ${formatCurrency(item.mora)}`;
+    msg += `\n`;
+  }
+
+  msg += `\n📌 *Total:* ${formatCurrency(cliente.total)}\n\n`;
+  msg += atrasado
+    ? `Por favor póngase al día lo antes posible. ¡Gracias!`
+    : `Por favor tenga su pago listo en la fecha. ¡Gracias!`;
   return msg;
 }

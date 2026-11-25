@@ -55,7 +55,7 @@ function resumen(prestamo: Prestamo, cuota: Cuota, pago: Pago) {
 
   return {
     ...estado,
-    etiquetaPago: `${etiquetaCuotaDe(cuota, prestamo)}${pago.solo_redito ? ' · solo rédito' : ''}`,
+    etiquetaPago: `${etiquetaCuotaDe(cuota, prestamo)}${pago.solo_redito ? (pago.abono_capital ? ` · rédito + ${formatCurrency(pago.abono_capital)} a capital` : ' · solo rédito') : ''}`,
     filaTotal: redito
       ? { etiqueta: 'Capital prestado', valor: Number(prestamo.monto_prestado) }
       : { etiqueta: 'Total a pagar', valor: Number(prestamo.total_a_pagar) },

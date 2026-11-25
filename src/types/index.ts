@@ -160,6 +160,8 @@ export interface Pago {
   saldo_de_prestamo: boolean;
   /** Se cobró sólo el rédito de la cuota y las cuotas se corrieron un periodo. */
   solo_redito?: boolean;
+  /** Cobro de rédito + capital: la parte que fue a capital. */
+  abono_capital?: number;
   /**
    * `monto` es el dinero que entró en esta operación. `credito_usado` es lo
    * que se pagó con saldo a favor y `excedente` la parte del dinero que

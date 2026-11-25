@@ -729,12 +729,18 @@ export const supabaseDataService = {
   },
 
   /** Cobra sólo el rédito de la cuota; ella y las siguientes se corren un periodo. */
-  async pagarSoloRedito(cuotaId: string, metodo: MetodoPago, referencia?: string): Promise<Prestamo> {
+  async pagarSoloRedito(
+    cuotaId: string,
+    metodo: MetodoPago,
+    referencia?: string,
+    capital = 0
+  ): Promise<Prestamo> {
     const supabase = requireSupabaseClient();
     const { data, error } = await supabase.rpc('pagar_solo_redito', {
       p_cuota_id: cuotaId,
       p_metodo: metodo,
       p_referencia: referencia ?? null,
+      p_capital: capital,
     });
     if (error) throw traducir(error, 'cobrar el rédito de la cuota');
     return data as Prestamo;

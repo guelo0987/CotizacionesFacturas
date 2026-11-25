@@ -1,5 +1,5 @@
 import type { Cuota, Pago, Prestamo } from '../types';
-import { FRECUENCIAS, frecuenciaSegura, modalidadSegura } from './calculos';
+import { FRECUENCIAS, frecuenciaSegura, modalidadSegura, moraPendiente } from './calculos';
 import { redondearDinero } from './validacion';
 import { aCuotaDePago } from './creditos';
 
@@ -66,6 +66,52 @@ export function capitalPendiente(prestamo: Prestamo): number {
 /** Rédito de un periodo con el capital que se debe hoy. */
 export function reditoActual(prestamo: Prestamo): number {
   return redondearDinero((capitalPendiente(prestamo) * (Number(prestamo.tasa_interes) || 0)) / 100);
+}
+
+export interface RepartoRedito {
+  /** Lo que la cuota ya tenía abonado y cuenta para el rédito. */
+  yaAbonado: number;
+  /** Rédito que falta cobrar. */
+  faltaRedito: number;
+  mora: number;
+  /** Capital de la cuota que queda pagado (lo de antes que pasó del rédito + el abono). */
+  capitalPagado: number;
+  /** Capital de la cuota que se corre al periodo siguiente. */
+  capitalQueSeCorre: number;
+  /** Lo que se cobra ahora. */
+  cobro: number;
+  error: string | null;
+}
+
+/**
+ * «Rédito + capital» en un préstamo con cuotas. Reproduce `pagar_solo_redito`
+ * del servidor: lo ya abonado cuenta primero para el rédito, se cobra lo que
+ * falte del rédito, la mora y el abono a capital, y el capital que no se pagó
+ * se corre con la cuota al periodo siguiente.
+ */
+export function repartoRedito(cuota: Cuota, abonoCapital: number): RepartoRedito {
+  const abono = redondearDinero(Math.max(0, Number(abonoCapital) || 0));
+  const pagado = redondearDinero(cuota.monto_pagado || 0);
+  const interes = redondearDinero(cuota.interes || 0);
+  const capital = redondearDinero(cuota.capital || 0);
+  const previoAlRedito = Math.min(pagado, interes);
+  const previoACapital = redondearDinero(pagado - previoAlRedito);
+  const faltaRedito = redondearDinero(interes - previoAlRedito);
+  const mora = moraPendiente(cuota);
+  const capitalPagado = redondearDinero(previoACapital + abono);
+
+  return {
+    yaAbonado: pagado,
+    faltaRedito,
+    mora,
+    capitalPagado,
+    capitalQueSeCorre: redondearDinero(Math.max(0, capital - capitalPagado)),
+    cobro: redondearDinero(faltaRedito + mora + abono),
+    error:
+      capitalPagado >= capital
+        ? 'Con ese abono se paga la cuota completa: cóbrala con «Cuota completa».'
+        : null,
+  };
 }
 
 /** Cómo se cobra el interés, en una línea legible. */

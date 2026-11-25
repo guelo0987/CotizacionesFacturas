@@ -147,7 +147,7 @@ export function calcularCuadre(datos: DatosCuadre, dia: string, zonaHoraria: str
       id: pago.id,
       tipo: 'cuota',
       cliente: nombreCliente(prestamo?.cliente_id),
-      concepto: `${cuota ? etiquetaCuota(cuota, prestamo) : 'Cuota'}${pago.solo_redito ? ' (solo rédito)' : ''} · ${referencia}`,
+      concepto: `${cuota ? etiquetaCuota(cuota, prestamo) : 'Cuota'}${pago.solo_redito ? (pago.abono_capital ? ' (rédito + capital)' : ' (solo rédito)') : ''} · ${referencia}`,
       mora,
     });
   }

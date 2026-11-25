@@ -151,7 +151,7 @@ export function mensajeAbono(
   msg += `Confirmamos su pago:\n\n`;
   msg += lineasCredito(pago.monto, pago.credito_usado, pago.excedente);
   msg += `📅 *Fecha:* ${formatDate(pago.fecha)}\n`;
-  msg += `🧾 *Pago de:* ${etiquetaCuotaDe(cuota, prestamo)}${pago.solo_redito ? ' (solo el rédito; las cuotas se corren un periodo)' : ''}\n`;
+  msg += `🧾 *Pago de:* ${etiquetaCuotaDe(cuota, prestamo)}${pago.solo_redito ? (pago.abono_capital ? ` (rédito + ${formatCurrency(pago.abono_capital)} a capital; las cuotas se corren un periodo)` : ' (solo el rédito; las cuotas se corren un periodo)') : ''}\n`;
   if (tras.capitalPendiente !== null) {
     msg += tras.capitalPendiente > 0
       ? `📌 *Capital que debe:* ${formatCurrency(tras.capitalPendiente)}\n`

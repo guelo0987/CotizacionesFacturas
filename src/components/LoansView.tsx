@@ -55,6 +55,7 @@ import {
   esRedito,
   etiquetaCuota,
   reditoActual,
+  repartoRedito,
 } from '../utils/documentosPrestamo';
 import {
   AlertCircle,
@@ -90,7 +91,7 @@ interface LoansViewProps {
     capital?: number
   ) => Promise<void>;
   /** Préstamo con cuotas: cobra sólo el rédito y corre las cuotas un periodo. */
-  onPagarSoloRedito: (cuotaId: string, metodo: MetodoPago, referencia?: string) => Promise<void>;
+  onPagarSoloRedito: (cuotaId: string, metodo: MetodoPago, referencia?: string, capital?: number) => Promise<void>;
   onDeletePrestamo: (prestamo: Prestamo) => Promise<void>;
   onConfigurarMora: (
     prestamoId: string,
@@ -320,17 +321,18 @@ export const LoansView: React.FC<LoansViewProps> = ({
   const prestamoEnPago = cuotaEnPago
     ? state.prestamos.find((p) => p.id === cuotaEnPago.prestamo_id) ?? null
     : null;
-  // «Solo rédito» en un préstamo con cuotas: la cuota sin abonos y con el
-  // rédito separado del capital
+  // «Rédito + capital» en un préstamo con cuotas: la cuota con el rédito
+  // separado del capital y sin el capital ya pagado
   const admiteSoloRedito = Boolean(
     cuotaEnPago &&
       prestamoEnPago &&
       !esRedito(prestamoEnPago) &&
       !cuotaEnPago.es_capital &&
-      (cuotaEnPago.monto_pagado || 0) === 0 &&
       cuotaEnPago.interes > 0 &&
-      cuotaEnPago.capital > 0
+      cuotaEnPago.capital > 0 &&
+      (cuotaEnPago.monto_pagado || 0) < cuotaEnPago.monto
   );
+  const reparto = cuotaEnPago && admiteSoloRedito ? repartoRedito(cuotaEnPago, pagoCapital ?? 0) : null;
   // A rédito, al cobrar un rédito se puede abonar a capital en el mismo cobro
   const admiteCapital = Boolean(prestamoEnPago && esRedito(prestamoEnPago) && cuotaEnPago && !cuotaEnPago.es_capital);
 
@@ -361,15 +363,24 @@ export const LoansView: React.FC<LoansViewProps> = ({
     if (!cuotaEnPago || !repartoAbono) return;
 
     if (modoCobro === 'solo_redito') {
+      if (reparto?.error) {
+        setErrorPago(reparto.error);
+        return;
+      }
       const ok = await ejecutar(() =>
-        onPagarSoloRedito(cuotaEnPago.id, pagoMetodo, limpiarTexto(pagoRef, 120) || undefined)
+        onPagarSoloRedito(
+          cuotaEnPago.id,
+          pagoMetodo,
+          limpiarTexto(pagoRef, 120) || undefined,
+          redondearDinero(pagoCapital ?? 0)
+        )
       );
       if (ok) setCuotaPagoId(null);
       return;
     }
 
     // A rédito: en el mismo cobro puede ir una parte a capital
-    const capital = redondearDinero(pagoCapital ?? 0);
+    const capital = admiteCapital ? redondearDinero(pagoCapital ?? 0) : 0;
     if (capital > 0) {
       const debe = prestamoEnPago ? capitalPendiente(prestamoEnPago) : 0;
       if (capital > debe) {
@@ -1863,7 +1874,7 @@ export const LoansView: React.FC<LoansViewProps> = ({
                   {(
                     [
                       ['normal', 'Cuota completa'],
-                      ['solo_redito', 'Solo el rédito'],
+                      ['solo_redito', 'Rédito + capital'],
                     ] as const
                   ).map(([valor, etiqueta]) => (
                     <button
@@ -1873,6 +1884,7 @@ export const LoansView: React.FC<LoansViewProps> = ({
                       aria-selected={modoCobro === valor}
                       onClick={() => {
                         setModoCobro(valor);
+                        setPagoCapital(null);
                         setErrorPago('');
                       }}
                       className={`py-1.5 rounded-lg text-xs font-bold transition-colors ${
@@ -1885,26 +1897,56 @@ export const LoansView: React.FC<LoansViewProps> = ({
                 </div>
               ) : null}
 
-              {modoCobro === 'solo_redito' ? (
-                <div className="bg-sky-50 border border-sky-200 p-3 rounded-xl text-sm space-y-1">
-                  <div className="flex justify-between text-slate-700">
-                    <span>Rédito de la cuota:</span>
-                    <span className="font-bold">{formatCurrency(cuotaEnPago.interes)}</span>
-                  </div>
-                  {moraPendiente(cuotaEnPago) > 0 ? (
-                    <div className="flex justify-between text-amber-900">
-                      <span>Mora:</span>
-                      <span className="font-bold">{formatCurrency(moraPendiente(cuotaEnPago))}</span>
+              {modoCobro === 'solo_redito' && reparto ? (
+                <div className="space-y-3">
+                  <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl text-sm space-y-1">
+                    <div className="flex justify-between text-slate-600">
+                      <span>Rédito de la cuota:</span>
+                      <span className="font-bold text-slate-800">{formatCurrency(cuotaEnPago.interes)}</span>
                     </div>
-                  ) : null}
-                  <div className="flex justify-between font-black text-slate-900 pt-1 border-t border-sky-200">
-                    <span>Cobras:</span>
-                    <span>{formatCurrency(redondearDinero(cuotaEnPago.interes + moraPendiente(cuotaEnPago)))}</span>
+                    {reparto.yaAbonado > 0 ? (
+                      <div className="flex justify-between text-slate-600">
+                        <span>Ya abonado:</span>
+                        <span className="font-semibold text-emerald-700">{formatCurrency(reparto.yaAbonado)}</span>
+                      </div>
+                    ) : null}
+                    <div className="flex justify-between text-slate-700 font-semibold">
+                      <span>Falta del rédito:</span>
+                      <span>{formatCurrency(reparto.faltaRedito)}</span>
+                    </div>
+                    {reparto.mora > 0 ? (
+                      <div className="flex justify-between text-amber-900 font-semibold">
+                        <span>Mora:</span>
+                        <span>{formatCurrency(reparto.mora)}</span>
+                      </div>
+                    ) : null}
                   </div>
-                  <p className="text-xs text-sky-900 pt-1 leading-snug">
-                    El capital de esta cuota ({formatCurrency(cuotaEnPago.capital)}) no se paga ahora: esta cuota y
-                    las siguientes se corren un periodo y el préstamo termina uno después.
-                  </p>
+
+                  <div>
+                    <label htmlFor="redito-capital" className="block text-sm font-semibold text-slate-700 mb-1">
+                      Abono a capital <span className="font-normal text-slate-400">— opcional</span>
+                    </label>
+                    <CampoMoneda
+                      id="redito-capital"
+                      value={pagoCapital}
+                      onChange={(monto) => {
+                        setPagoCapital(monto);
+                        setErrorPago('');
+                      }}
+                      className="font-black"
+                    />
+                  </div>
+
+                  <div className="bg-sky-50 border border-sky-200 p-3 rounded-xl text-sm space-y-1">
+                    <div className="flex justify-between font-black text-slate-900">
+                      <span>Cobras:</span>
+                      <span>{formatCurrency(reparto.cobro)}</span>
+                    </div>
+                    <p className="text-xs text-sky-900 pt-1 leading-snug">
+                      {reparto.error ??
+                        `Los ${formatCurrency(reparto.capitalQueSeCorre)} de capital que faltan de esta cuota se corren: esta cuota y las siguientes pasan al periodo siguiente y el préstamo termina uno después.`}
+                    </p>
+                  </div>
                 </div>
               ) : null}
 
@@ -2148,7 +2190,9 @@ export const LoansView: React.FC<LoansViewProps> = ({
                   {ejecutando
                     ? 'Registrando…'
                     : modoCobro === 'solo_redito'
-                    ? 'Cobrar solo el rédito'
+                    ? (pagoCapital ?? 0) > 0
+                      ? 'Cobrar rédito + capital'
+                      : 'Cobrar el rédito'
                     : 'Confirmar abono'}
                 </button>
               </div>

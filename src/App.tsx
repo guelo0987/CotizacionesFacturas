@@ -690,10 +690,18 @@ export function App() {
     );
   };
 
-  const handlePagarSoloRedito = async (cuotaId: string, metodo: MetodoPago, referencia?: string) => {
-    const actualizado = await supabaseDataService.pagarSoloRedito(cuotaId, metodo, referencia);
+  const handlePagarSoloRedito = async (
+    cuotaId: string,
+    metodo: MetodoPago,
+    referencia?: string,
+    capital = 0
+  ) => {
+    const actualizado = await supabaseDataService.pagarSoloRedito(cuotaId, metodo, referencia, capital);
     ponerPrestamo(actualizado);
-    exito('Rédito cobrado. Esta cuota y las siguientes se corrieron un periodo.');
+    exito(
+      (capital > 0 ? `Rédito y ${formatCurrency(capital)} a capital cobrados.` : 'Rédito cobrado.') +
+        ' Lo que faltó de capital se corrió con las cuotas un periodo.'
+    );
   };
 
   /** Pone en el estado un préstamo recién devuelto por el servidor, con sus pagos. */

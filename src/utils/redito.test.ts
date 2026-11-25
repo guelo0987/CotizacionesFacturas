@@ -7,6 +7,7 @@ import {
   etiquetaCuotaDe,
   plazoPrestamo,
   reditoActual,
+  repartoRedito,
 } from './documentosPrestamo';
 import { calcularPrestamo, MODALIDADES_CON_PLAZO } from './calculos';
 import { calcularCuadre } from './cuadre';
@@ -91,5 +92,37 @@ describe('préstamo a rédito', () => {
     const lista = clientesPorCobrar({ prestamos: [prestamo], clientes: [] }, '2026-12-24');
     expect(lista).toHaveLength(1);
     expect(lista[0].cuotas.map((c) => c.cuota.id)).toEqual(['r2']);
+  });
+});
+
+describe('rédito + capital en un préstamo con cuotas', () => {
+  // Cuota de 3,500 = 1,000 de rédito + 2,500 de capital
+  const cuota = (pagado: number, mora = 0) =>
+    ({
+      id: 'q', prestamo_id: 'p', numero: 2, fecha_vencimiento: '2026-12-25', monto: 3500, monto_pagado: pagado,
+      interes: 1000, capital: 2500, saldo_capital: 7500, mora_acumulada: mora, mora_pagada: 0, estado: 'parcial',
+    }) as Cuota;
+
+  it('el caso de la pantalla: 500 ya abonados, rédito + 500 a capital', () => {
+    expect(repartoRedito(cuota(500), 500)).toEqual({
+      yaAbonado: 500, faltaRedito: 500, mora: 0, capitalPagado: 500, capitalQueSeCorre: 2000, cobro: 1000, error: null,
+    });
+  });
+
+  it('solo el rédito, sin abonos previos', () => {
+    expect(repartoRedito(cuota(0), 0)).toMatchObject({ faltaRedito: 1000, capitalQueSeCorre: 2500, cobro: 1000 });
+  });
+
+  it('lo abonado de más del rédito ya cuenta como capital', () => {
+    expect(repartoRedito(cuota(1500), 0)).toMatchObject({ faltaRedito: 0, capitalPagado: 500, capitalQueSeCorre: 2000, cobro: 0 });
+  });
+
+  it('cobra también la mora', () => {
+    expect(repartoRedito(cuota(0, 300), 200)).toMatchObject({ cobro: 1500, mora: 300 });
+  });
+
+  it('si con el abono se paga todo el capital, es la cuota completa', () => {
+    expect(repartoRedito(cuota(500), 2500).error).toMatch(/Cuota completa/);
+    expect(repartoRedito(cuota(0), 2499.99).error).toBeNull();
   });
 });

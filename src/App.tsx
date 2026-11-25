@@ -257,7 +257,9 @@ export function App() {
     const supabase = getSupabaseClient();
     const userId = sesion?.user?.id;
     try {
-      await supabase?.auth.signOut();
+      // Sólo este dispositivo: salir en una computadora no debe sacar al
+      // usuario del teléfono donde está cobrando.
+      await supabase?.auth.signOut({ scope: 'local' });
     } catch (e) {
       avisarError(mensajeDeError(e));
     }

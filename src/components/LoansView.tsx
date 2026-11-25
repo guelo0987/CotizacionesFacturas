@@ -1996,7 +1996,9 @@ export const LoansView: React.FC<LoansViewProps> = ({
                     className="font-black"
                   />
                   <p className="text-xs text-slate-500 mt-1">
-                    Puedes abonar menos que la cuota; si entrega de más, el resto queda a su favor.
+                    {admiteCapital
+                      ? 'Puedes abonar menos que el rédito. Si trae más, ponlo en «Abono a capital».'
+                      : 'Puedes abonar menos que la cuota; si entrega de más, el resto queda a su favor.'}
                   </p>
                 </div>
               )}

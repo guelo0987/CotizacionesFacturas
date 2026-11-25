@@ -2,7 +2,7 @@ import React from 'react';
 import type { BusinessSettings, Cliente, Cuota, MovimientoCredito, Pago, Prestamo } from '../types';
 import { mensajeAbono, mensajePrestamo, mensajeSaldo } from '../utils/whatsapp';
 import { VistaPreviaModal } from './documentos/VistaPreviaModal';
-import { etiquetaCuotaDe, plazoPrestamo, referenciaAbono, referenciaPrestamo } from '../utils/documentosPrestamo';
+import { esRedito, etiquetaCuotaDe, plazoPrestamo, referenciaAbono, referenciaPrestamo } from '../utils/documentosPrestamo';
 import {
   ComprobantePrestamoA4,
   ComprobantePrestamoTermico,
@@ -62,7 +62,11 @@ export const PrestamoPdfModal: React.FC<PrestamoPdfModalProps> = ({
     return (
       <VistaPreviaModal
         titulo={`Recibo de saldo · ${referencia}`}
-        subtitulo={`${pagos.length} cuota${pagos.length === 1 ? '' : 's'} liquidada${pagos.length === 1 ? '' : 's'} · préstamo saldado`}
+        subtitulo={
+          esRedito(prestamo)
+            ? 'Préstamo a rédito saldado'
+            : `${pagos.length} cuota${pagos.length === 1 ? '' : 's'} liquidada${pagos.length === 1 ? '' : 's'} · préstamo saldado`
+        }
         archivoBase={referencia}
         tituloCompartir={`Recibo de saldo ${referencia}`}
         textoWhatsapp={mensajeSaldo(prestamo, pagos, cliente, settings, saldoAFavor)}

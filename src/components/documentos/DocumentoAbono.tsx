@@ -189,7 +189,7 @@ export const ReciboAbonoA4: React.FC<Props> = ({
       <div className="grid grid-cols-2 gap-3 text-xs">
         <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-1.5">
           <div className="font-bold uppercase tracking-wider text-slate-500 text-[10px]">
-            Cuota abonada
+            {cuota.es_capital ? 'Abono a capital' : 'Cuota abonada'}
           </div>
           <div className="flex justify-between text-slate-700">
             <span>Pago de:</span>
@@ -197,16 +197,19 @@ export const ReciboAbonoA4: React.FC<Props> = ({
               {etiquetaPago}
             </span>
           </div>
+          {/* El capital de un préstamo a rédito no vence */}
+          {cuota.es_capital ? null : (
+            <div className="flex justify-between text-slate-700">
+              <span>Vencimiento:</span>
+              <span className="font-semibold">{formatDate(cuota.fecha_vencimiento)}</span>
+            </div>
+          )}
           <div className="flex justify-between text-slate-700">
-            <span>Vencimiento:</span>
-            <span className="font-semibold">{formatDate(cuota.fecha_vencimiento)}</span>
-          </div>
-          <div className="flex justify-between text-slate-700">
-            <span>Monto de la cuota:</span>
+            <span>{cuota.es_capital ? 'Capital prestado:' : 'Monto de la cuota:'}</span>
             <span className="font-semibold">{formatCurrency(cuota.monto)}</span>
           </div>
           <div className="flex justify-between text-slate-700">
-            <span>Abonado a la cuota:</span>
+            <span>{cuota.es_capital ? 'Abonado a capital:' : 'Abonado a la cuota:'}</span>
             <span className="font-semibold text-emerald-700">
               {formatCurrency(abonadoCuota)}
             </span>
@@ -222,7 +225,15 @@ export const ReciboAbonoA4: React.FC<Props> = ({
               restaCuota <= 0 ? 'text-emerald-800 bg-emerald-100' : 'text-amber-900 bg-amber-100'
             }`}
           >
-            <span>{restaCuota <= 0 ? 'Cuota saldada' : 'Resta de la cuota:'}</span>
+            <span>
+              {restaCuota <= 0
+                ? cuota.es_capital
+                  ? 'Capital pagado'
+                  : 'Cuota saldada'
+                : cuota.es_capital
+                  ? 'Debe de capital:'
+                  : 'Resta de la cuota:'}
+            </span>
             <span>{restaCuota <= 0 ? '✓' : formatCurrency(restaCuota)}</span>
           </div>
         </div>
@@ -370,11 +381,13 @@ export const ReciboAbonoTermico: React.FC<Props & { formato: FormatoImpresion }>
         <div className="font-bold uppercase">
           {etiquetaPago}
         </div>
-        <FilaTermica etiqueta="Vence:" valor={formatDate(cuota.fecha_vencimiento)} />
-        <FilaTermica etiqueta="Monto cuota:" valor={monto(cuota.monto)} />
+        {cuota.es_capital ? null : (
+          <FilaTermica etiqueta="Vence:" valor={formatDate(cuota.fecha_vencimiento)} />
+        )}
+        <FilaTermica etiqueta={cuota.es_capital ? 'Capital:' : 'Monto cuota:'} valor={monto(cuota.monto)} />
         <FilaTermica etiqueta="Abonado:" valor={monto(abonadoCuota)} />
         <FilaTermica
-          etiqueta={restaCuota <= 0 ? 'Cuota:' : 'Resta cuota:'}
+          etiqueta={restaCuota <= 0 ? (cuota.es_capital ? 'Capital:' : 'Cuota:') : cuota.es_capital ? 'Debe capital:' : 'Resta cuota:'}
           valor={restaCuota <= 0 ? 'SALDADA' : monto(restaCuota)}
           fuerte
         />

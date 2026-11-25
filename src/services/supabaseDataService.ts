@@ -706,19 +706,37 @@ export const supabaseDataService = {
     metodo: MetodoPago,
     referencia?: string,
     montoMora = 0,
-    credito = 0
+    credito = 0,
+    capital = 0
   ): Promise<Prestamo> {
     const supabase = requireSupabaseClient();
-    const { data, error } = await supabase.rpc('registrar_pago_cuota', {
+    const parametros = {
       p_cuota_id: cuotaId,
       p_monto: monto,
       p_metodo: metodo,
       p_referencia: referencia ?? null,
       p_monto_mora: montoMora,
       p_credito: credito,
-    });
+    };
+    // A rédito, con abono a capital: las dos partes en una sola operación
+    const { data, error } =
+      capital > 0
+        ? await supabase.rpc('cobrar_redito', { ...parametros, p_capital: capital })
+        : await supabase.rpc('registrar_pago_cuota', parametros);
 
     if (error) throw traducir(error, 'registrar el abono de la cuota');
+    return data as Prestamo;
+  },
+
+  /** Cobra sólo el rédito de la cuota; ella y las siguientes se corren un periodo. */
+  async pagarSoloRedito(cuotaId: string, metodo: MetodoPago, referencia?: string): Promise<Prestamo> {
+    const supabase = requireSupabaseClient();
+    const { data, error } = await supabase.rpc('pagar_solo_redito', {
+      p_cuota_id: cuotaId,
+      p_metodo: metodo,
+      p_referencia: referencia ?? null,
+    });
+    if (error) throw traducir(error, 'cobrar el rédito de la cuota');
     return data as Prestamo;
   },
 

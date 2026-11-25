@@ -14,7 +14,7 @@ import {
   TituloDocumentoA4,
 } from './piezas';
 import { montoTermico } from '../../utils/formatoTermico';
-import { METODOS_PAGO, referenciaPrestamo } from '../../utils/documentosPrestamo';
+import { METODOS_PAGO, esRedito, etiquetaCuota, referenciaPrestamo } from '../../utils/documentosPrestamo';
 import { aCuotaDePago } from '../../utils/creditos';
 
 interface Props {
@@ -31,10 +31,21 @@ interface Props {
 /** Cifras del recibo de saldo, reunidas a partir de sus pagos. */
 function resumen(prestamo: Prestamo, pagos: Pago[]) {
   const numeroDe = new Map((prestamo.cuotas ?? []).map((c) => [c.id, c.numero]));
+  const cuotaDe = new Map((prestamo.cuotas ?? []).map((c) => [c.id, c]));
 
   const lineas = pagos
     .map((p) => ({
       numero: numeroDe.get(p.cuota_id ?? '') ?? 0,
+      // «#3 de 8», o «Rédito #3» / «Capital» en un préstamo a rédito
+      etiqueta: (() => {
+        const cuota = cuotaDe.get(p.cuota_id ?? '');
+        if (!cuota) return '—';
+        return esRedito(prestamo) ? etiquetaCuota(cuota, prestamo) : `#${cuota.numero} de ${prestamo.num_cuotas}`;
+      })(),
+      corta: (() => {
+        const cuota = cuotaDe.get(p.cuota_id ?? '');
+        return cuota?.es_capital ? 'Capital' : `#${numeroDe.get(p.cuota_id ?? '') ?? 0}`;
+      })(),
       aCuota: aCuotaDePago(p),
       mora: redondearDinero(p.monto_mora || 0),
     }))
@@ -156,7 +167,7 @@ export const ReciboSaldoA4: React.FC<Props> = ({
             {r.lineas.map((l) => (
               <tr key={l.numero}>
                 <td className="px-2 py-1.5 text-slate-700">
-                  #{l.numero} de {prestamo.num_cuotas}
+                  {l.etiqueta}
                 </td>
                 <td className="px-2 py-1.5 text-right text-slate-700">{formatCurrency(l.aCuota)}</td>
                 {r.totalMora > 0 ? (
@@ -277,7 +288,7 @@ export const ReciboSaldoTermico: React.FC<Props & { formato: FormatoImpresion }>
         {r.lineas.map((l) => (
           <FilaTermica
             key={l.numero}
-            etiqueta={`#${l.numero}${l.mora > 0 ? ' +mora' : ''}`}
+            etiqueta={`${l.corta}${l.mora > 0 ? ' +mora' : ''}`}
             valor={monto(redondearDinero(l.aCuota + l.mora))}
           />
         ))}

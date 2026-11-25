@@ -18,7 +18,9 @@ import { montoTermico } from '../../utils/formatoTermico';
 import { aCuotaDePago } from '../../utils/creditos';
 import {
   METODOS_PAGO,
+  esRedito,
   estadoTrasPago,
+  etiquetaCuotaDe,
   referenciaAbono,
   referenciaPrestamo,
 } from '../../utils/documentosPrestamo';
@@ -47,8 +49,19 @@ function resumen(prestamo: Prestamo, cuota: Cuota, pago: Pago) {
   const efectivo = redondearDinero(pago.monto || 0);
   const credito = redondearDinero(pago.credito_usado || 0);
 
+  // A rédito el «total» crece con cada periodo: lo que importa es el capital
+  const redito = esRedito(prestamo) && estado.capitalPendiente !== null;
+  const saldoMostrado = redito ? (estado.capitalPendiente ?? 0) : estado.saldoPrestamo;
+
   return {
     ...estado,
+    etiquetaPago: `${etiquetaCuotaDe(cuota, prestamo)}${pago.solo_redito ? ' · solo rédito' : ''}`,
+    filaTotal: redito
+      ? { etiqueta: 'Capital prestado', valor: Number(prestamo.monto_prestado) }
+      : { etiqueta: 'Total a pagar', valor: Number(prestamo.total_a_pagar) },
+    etiquetaSaldo: redito ? 'CAPITAL QUE DEBE' : 'SALDO',
+    saldoMostrado,
+    saldado: redito ? saldoMostrado <= 0 && estado.saldoPrestamo <= 0 : estado.saldoPrestamo <= 0,
     // El pago se reparte entre la mora y la cuota; el recibo tiene que
     // decir cuánto fue a cada cosa o el cliente no entiende por qué su
     // cuota bajó menos de lo que entregó.
@@ -84,7 +97,11 @@ export const ReciboAbonoA4: React.FC<Props> = ({
     abonadoCuota,
     restaCuota,
     abonadoTotal,
-    saldoPrestamo,
+    saldoMostrado,
+    saldado,
+    etiquetaSaldo,
+    filaTotal,
+    etiquetaPago,
     aMora,
     aCuota,
     moraCuota,
@@ -175,9 +192,9 @@ export const ReciboAbonoA4: React.FC<Props> = ({
             Cuota abonada
           </div>
           <div className="flex justify-between text-slate-700">
-            <span>Cuota:</span>
+            <span>Pago de:</span>
             <span className="font-bold text-slate-900">
-              #{cuota.numero} de {prestamo.num_cuotas}
+              {etiquetaPago}
             </span>
           </div>
           <div className="flex justify-between text-slate-700">
@@ -215,8 +232,8 @@ export const ReciboAbonoA4: React.FC<Props> = ({
             Estado del préstamo
           </div>
           <div className="flex justify-between text-slate-700">
-            <span>Total a pagar:</span>
-            <span className="font-semibold">{formatCurrency(prestamo.total_a_pagar)}</span>
+            <span>{filaTotal.etiqueta}:</span>
+            <span className="font-semibold">{formatCurrency(filaTotal.valor)}</span>
           </div>
           <div className="flex justify-between text-slate-700">
             <span>Abonado en total:</span>
@@ -231,12 +248,12 @@ export const ReciboAbonoA4: React.FC<Props> = ({
             </div>
           ) : null}
           <div className="flex justify-between text-sm font-black text-slate-900 pt-1.5 border-t border-slate-300">
-            <span>SALDO:</span>
-            <span className={saldoPrestamo <= 0 ? 'text-emerald-700' : 'text-amber-800'}>
-              {formatCurrency(saldoPrestamo)}
+            <span>{etiquetaSaldo}:</span>
+            <span className={saldado ? 'text-emerald-700' : 'text-amber-800'}>
+              {formatCurrency(saldoMostrado)}
             </span>
           </div>
-          {saldoPrestamo <= 0 ? (
+          {saldado ? (
             <div className="text-[11px] font-bold text-emerald-800 bg-emerald-100 p-1.5 rounded text-center">
               PRÉSTAMO SALDADO POR COMPLETO
             </div>
@@ -285,7 +302,11 @@ export const ReciboAbonoTermico: React.FC<Props & { formato: FormatoImpresion }>
     abonadoCuota,
     restaCuota,
     abonadoTotal,
-    saldoPrestamo,
+    saldoMostrado,
+    saldado,
+    etiquetaSaldo,
+    filaTotal,
+    etiquetaPago,
     aMora,
     aCuota,
     moraCuota,
@@ -347,7 +368,7 @@ export const ReciboAbonoTermico: React.FC<Props & { formato: FormatoImpresion }>
 
       <div className="space-y-0.5">
         <div className="font-bold uppercase">
-          Cuota #{cuota.numero} de {prestamo.num_cuotas}
+          {etiquetaPago}
         </div>
         <FilaTermica etiqueta="Vence:" valor={formatDate(cuota.fecha_vencimiento)} />
         <FilaTermica etiqueta="Monto cuota:" valor={monto(cuota.monto)} />
@@ -366,16 +387,16 @@ export const ReciboAbonoTermico: React.FC<Props & { formato: FormatoImpresion }>
 
       <div className="space-y-0.5">
         <div className="font-bold uppercase">Estado del préstamo</div>
-        <FilaTermica etiqueta="Total a pagar:" valor={monto(prestamo.total_a_pagar)} />
+        <FilaTermica etiqueta={`${filaTotal.etiqueta}:`} valor={monto(filaTotal.valor)} />
         <FilaTermica etiqueta="Abonado total:" valor={monto(abonadoTotal)} />
         {moraPrestamo > 0 ? (
           <FilaTermica etiqueta="Mora pendiente:" valor={monto(moraPrestamo)} fuerte />
         ) : null}
         <div className={`${titulo} font-bold flex justify-between gap-2 pt-1 border-t border-black`}>
-          <span>SALDO:</span>
-          <span className="tabular-nums whitespace-nowrap">{formatCurrency(saldoPrestamo)}</span>
+          <span>{etiquetaSaldo}:</span>
+          <span className="tabular-nums whitespace-nowrap">{formatCurrency(saldoMostrado)}</span>
         </div>
-        {saldoPrestamo <= 0 ? (
+        {saldado ? (
           <div className="text-center font-bold pt-1">PRÉSTAMO SALDADO</div>
         ) : null}
         {saldoAFavor !== null ? (

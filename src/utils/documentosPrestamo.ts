@@ -23,6 +23,51 @@ export function referenciaAbono(pago: Pago): string {
   return `REC-${pago.id.slice(0, 8).toUpperCase()}`;
 }
 
+/** Préstamo a rédito: sin plazo, se cobra el rédito hasta que pague el capital. */
+export function esRedito(prestamo: Pick<Prestamo, 'modalidad_interes'> | null | undefined): boolean {
+  return prestamo?.modalidad_interes === 'redito';
+}
+
+/** «Cuota #3», «Rédito #3» o «Capital». */
+export function etiquetaCuota(
+  cuota: Pick<Cuota, 'numero' | 'es_capital'>,
+  prestamo?: Pick<Prestamo, 'modalidad_interes'> | null
+): string {
+  if (cuota.es_capital) return 'Capital';
+  return esRedito(prestamo) ? `Rédito #${cuota.numero}` : `Cuota #${cuota.numero}`;
+}
+
+/** «Cuota #3 de 8», «Rédito #3» o «Capital»: con el total sólo si hay plazo. */
+export function etiquetaCuotaDe(
+  cuota: Pick<Cuota, 'numero' | 'es_capital'>,
+  prestamo: Pick<Prestamo, 'modalidad_interes' | 'num_cuotas'>
+): string {
+  const etiqueta = etiquetaCuota(cuota, prestamo);
+  return esRedito(prestamo) ? etiqueta : `${etiqueta} de ${prestamo.num_cuotas}`;
+}
+
+/** «8 cuotas» o «Plazo indefinido». */
+export function plazoPrestamo(prestamo: Pick<Prestamo, 'modalidad_interes' | 'num_cuotas'>): string {
+  if (esRedito(prestamo)) return 'Plazo indefinido';
+  return `${prestamo.num_cuotas} ${prestamo.num_cuotas === 1 ? 'cuota' : 'cuotas'}`;
+}
+
+/** La cuota de capital de un préstamo a rédito. */
+export function cuotaCapital(prestamo: Prestamo): Cuota | undefined {
+  return (prestamo.cuotas ?? []).find((c) => c.es_capital);
+}
+
+/** Capital que todavía se debe en un préstamo a rédito. */
+export function capitalPendiente(prestamo: Prestamo): number {
+  const capital = cuotaCapital(prestamo);
+  return capital ? redondearDinero(Math.max(0, capital.monto - (capital.monto_pagado || 0))) : 0;
+}
+
+/** Rédito de un periodo con el capital que se debe hoy. */
+export function reditoActual(prestamo: Prestamo): number {
+  return redondearDinero((capitalPendiente(prestamo) * (Number(prestamo.tasa_interes) || 0)) / 100);
+}
+
 /** Cómo se cobra el interés, en una línea legible. */
 export function descripcionInteres(prestamo: Prestamo): string {
   const adjetivo = FRECUENCIAS[frecuenciaSegura(prestamo.frecuencia)].adjetivo;
@@ -31,6 +76,8 @@ export function descripcionInteres(prestamo: Prestamo): string {
       return `${prestamo.tasa_interes}% ${adjetivo} sobre el capital, en cada cuota`;
     case 'amortizado':
       return `${prestamo.tasa_interes}% ${adjetivo} sobre el saldo pendiente (cuota fija)`;
+    case 'redito':
+      return `${prestamo.tasa_interes}% ${adjetivo} sobre el capital que se deba (a rédito, sin plazo)`;
     default:
       return `${prestamo.tasa_interes}% único sobre el capital`;
   }
@@ -50,6 +97,11 @@ export interface EstadoTrasPago {
   saldoPrestamo: number;
   /** Es el pago más reciente del préstamo: lo de hoy también vale para él. */
   esElUltimo: boolean;
+  /**
+   * Préstamo a rédito: capital que quedó debiendo. Su «saldo» crece con
+   * cada periodo nuevo, así que lo que sirve en el recibo es el capital.
+   */
+  capitalPendiente: number | null;
 }
 
 /** Instante de un pago, para ordenar la historia. */
@@ -66,17 +118,27 @@ function instante(pago: Pago): number {
  * préstamo ya saldado diría «saldo RD$0.00, préstamo saldado».
  */
 export function estadoTrasPago(prestamo: Prestamo, cuota: Cuota, pago: Pago): EstadoTrasPago {
-  const resultado = (abonadoCuota: number, abonadoTotal: number, esElUltimo: boolean) => ({
+  const capital = esRedito(prestamo) ? cuotaCapital(prestamo) : undefined;
+  const resultado = (
+    abonadoCuota: number,
+    abonadoTotal: number,
+    esElUltimo: boolean,
+    abonadoCapital: number | null
+  ) => ({
     abonadoCuota: redondearDinero(abonadoCuota),
     restaCuota: redondearDinero(Math.max(0, cuota.monto - abonadoCuota)),
     abonadoTotal: redondearDinero(abonadoTotal),
     saldoPrestamo: redondearDinero(Math.max(0, prestamo.total_a_pagar - abonadoTotal)),
     esElUltimo,
+    capitalPendiente:
+      capital && abonadoCapital !== null
+        ? redondearDinero(Math.max(0, capital.monto - abonadoCapital))
+        : null,
   });
 
   // Sin el historial de pagos sólo se puede dar el estado de hoy
   if (!prestamo.pagos) {
-    return resultado(cuota.monto_pagado || 0, totalAbonado(prestamo), true);
+    return resultado(cuota.monto_pagado || 0, totalAbonado(prestamo), true, capital?.monto_pagado ?? null);
   }
 
   const pagos = prestamo.pagos.some((p) => p.id === pago.id)
@@ -91,7 +153,8 @@ export function estadoTrasPago(prestamo: Prestamo, cuota: Cuota, pago: Pago): Es
   return resultado(
     hasta.filter((p) => p.cuota_id === cuota.id).reduce((s, p) => s + aLaCuota(p), 0),
     hasta.reduce((s, p) => s + aLaCuota(p), 0),
-    hasta.length === pagos.length
+    hasta.length === pagos.length,
+    capital ? hasta.filter((p) => p.cuota_id === capital.id).reduce((s, p) => s + aLaCuota(p), 0) : null
   );
 }
 

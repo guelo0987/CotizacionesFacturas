@@ -1,6 +1,7 @@
 import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import type { AppState, Cliente, LadoCedula, MetodoCobro, MovimientoCredito } from '../types';
 import { FotosCedula } from './FotosCedula';
+import { capitalPendiente, esRedito } from '../utils/documentosPrestamo';
 import type { SolicitudApertura } from '../App';
 import { formatCurrency, formatDate, formatDocumento, formatTelefono } from '../utils/sanitizer';
 import {
@@ -895,13 +896,16 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                               {formatCurrency(pres.monto_prestado)}
                             </span>
                             <span className="text-slate-400 text-[11px] block">
-                              {pres.num_cuotas} cuotas{' '}
-                              {FRECUENCIAS[frecuenciaSegura(pres.frecuencia)].plural}
+                              {esRedito(pres)
+                                ? `Plazo indefinido · ${FRECUENCIAS[frecuenciaSegura(pres.frecuencia)].adjetivo}`
+                                : `${pres.num_cuotas} cuotas ${FRECUENCIAS[frecuenciaSegura(pres.frecuencia)].plural}`}
                             </span>
                           </div>
                           <div className="text-right">
                             <span className="font-bold text-emerald-700 block">
-                              Total: {formatCurrency(pres.total_a_pagar)}
+                              {esRedito(pres)
+                                ? `Debe capital: ${formatCurrency(capitalPendiente(pres))}`
+                                : `Total: ${formatCurrency(pres.total_a_pagar)}`}
                             </span>
                             <span className="text-[11px] text-slate-500">
                               Tasa {pres.tasa_interes}%{' '}

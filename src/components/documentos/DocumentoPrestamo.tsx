@@ -10,8 +10,12 @@ import {
   moraPendientePrestamo,
 } from '../../utils/calculos';
 import {
+  capitalPendiente,
   descripcionInteres,
+  esRedito,
+  etiquetaCuota,
   referenciaPrestamo,
+  reditoActual,
   totalAbonado,
 } from '../../utils/documentosPrestamo';
 import type { FormatoImpresion } from '../../utils/formatosImpresion';
@@ -42,6 +46,9 @@ export const ComprobantePrestamoA4: React.FC<Props> = ({ id, prestamo, cliente, 
   const cuotas = prestamo.cuotas ?? [];
   const frecuencia = FRECUENCIAS[frecuenciaSegura(prestamo.frecuencia)];
   const abonado = totalAbonado(prestamo);
+  // A rédito no hay total fijo: se muestra el rédito de hoy y el capital que debe
+  const redito = esRedito(prestamo);
+  const plazo = redito ? `Indefinido (${frecuencia.adjetivo})` : `${prestamo.num_cuotas} ${frecuencia.plural}`;
 
   return (
     <div
@@ -93,12 +100,16 @@ export const ComprobantePrestamoA4: React.FC<Props> = ({ id, prestamo, cliente, 
             </span>
           </div>
           <div className="flex justify-between text-slate-700">
-            <span>Interés total:</span>
-            <span className="font-semibold">{formatCurrency(prestamo.interes_total)}</span>
+            <span>{redito ? 'Rédito por periodo hoy:' : 'Interés total:'}</span>
+            <span className="font-semibold">
+              {formatCurrency(redito ? reditoActual(prestamo) : prestamo.interes_total)}
+            </span>
           </div>
           <div className="flex justify-between text-sm font-black text-slate-900 pt-1.5 border-t border-slate-300">
-            <span>TOTAL A PAGAR:</span>
-            <span className="text-emerald-700">{formatCurrency(prestamo.total_a_pagar)}</span>
+            <span>{redito ? 'CAPITAL QUE DEBE:' : 'TOTAL A PAGAR:'}</span>
+            <span className="text-emerald-700">
+              {formatCurrency(redito ? capitalPendiente(prestamo) : prestamo.total_a_pagar)}
+            </span>
           </div>
           <p className="text-[10px] text-slate-500 pt-1 leading-snug">
             {descripcionInteres(prestamo)}.
@@ -110,10 +121,8 @@ export const ComprobantePrestamoA4: React.FC<Props> = ({ id, prestamo, cliente, 
             Forma de pago
           </div>
           <div className="flex justify-between text-slate-700">
-            <span>Cuotas:</span>
-            <span className="font-semibold">
-              {prestamo.num_cuotas} {frecuencia.plural}
-            </span>
+            <span>{redito ? 'Plazo:' : 'Cuotas:'}</span>
+            <span className="font-semibold">{plazo}</span>
           </div>
           <div className="flex justify-between text-slate-700">
             <span>Vencimiento:</span>
@@ -169,8 +178,12 @@ export const ComprobantePrestamoA4: React.FC<Props> = ({ id, prestamo, cliente, 
           <tbody className="divide-y divide-slate-200">
             {cuotas.map((cuota) => (
               <tr key={cuota.id}>
-                <td className="p-2 text-slate-700">{cuota.numero}</td>
-                <td className="p-2 text-slate-700">{formatDate(cuota.fecha_vencimiento)}</td>
+                <td className="p-2 text-slate-700">
+                  {cuota.es_capital ? 'Capital' : redito ? etiquetaCuota(cuota, prestamo) : cuota.numero}
+                </td>
+                <td className="p-2 text-slate-700">
+                  {cuota.es_capital ? 'Cuando pueda' : formatDate(cuota.fecha_vencimiento)}
+                </td>
                 <td className="p-2 text-right font-bold text-slate-900">
                   {formatCurrency(cuota.monto)}
                 </td>
@@ -227,6 +240,9 @@ export const ComprobantePrestamoTermico: React.FC<Props & { formato: FormatoImpr
   const cuotas = prestamo.cuotas ?? [];
   const frecuencia = FRECUENCIAS[frecuenciaSegura(prestamo.frecuencia)];
   const abonado = totalAbonado(prestamo);
+  // A rédito no hay total fijo: se muestra el rédito de hoy y el capital que debe
+  const redito = esRedito(prestamo);
+  const plazo = redito ? `Indefinido (${frecuencia.adjetivo})` : `${prestamo.num_cuotas} ${frecuencia.plural}`;
 
   return (
     <HojaTermica id={id} formato={formato}>
@@ -254,17 +270,17 @@ export const ComprobantePrestamoTermico: React.FC<Props & { formato: FormatoImpr
       {/* Condiciones */}
       <div className="space-y-0.5">
         <FilaTermica etiqueta="Capital:" valor={monto(prestamo.monto_prestado)} />
-        <FilaTermica etiqueta="Interés:" valor={monto(prestamo.interes_total)} />
+        <FilaTermica
+          etiqueta={redito ? 'Rédito hoy:' : 'Interés:'}
+          valor={monto(redito ? reditoActual(prestamo) : prestamo.interes_total)}
+        />
         <div className={`${total} font-bold flex justify-between gap-2 pt-1 border-t border-black`}>
-          <span>TOTAL:</span>
+          <span>{redito ? 'DEBE CAPITAL:' : 'TOTAL:'}</span>
           <span className="tabular-nums whitespace-nowrap">
-            {formatCurrency(prestamo.total_a_pagar)}
+            {formatCurrency(redito ? capitalPendiente(prestamo) : prestamo.total_a_pagar)}
           </span>
         </div>
-        <FilaTermica
-          etiqueta="Cuotas:"
-          valor={`${prestamo.num_cuotas} ${frecuencia.plural}`}
-        />
+        <FilaTermica etiqueta={redito ? 'Plazo:' : 'Cuotas:'} valor={plazo} />
         <FilaTermica etiqueta="Abonado:" valor={monto(abonado)} />
         <FilaTermica
           etiqueta="Resta:"
@@ -294,7 +310,9 @@ export const ComprobantePrestamoTermico: React.FC<Props & { formato: FormatoImpr
         {cuotas.map((cuota) => (
           <div key={cuota.id} className="flex justify-between gap-1">
             <span className="whitespace-nowrap">
-              {String(cuota.numero).padStart(2, '0')} {formatDate(cuota.fecha_vencimiento)}
+              {cuota.es_capital
+                ? 'Capital'
+                : `${String(cuota.numero).padStart(2, '0')} ${formatDate(cuota.fecha_vencimiento)}`}
             </span>
             <span className="tabular-nums whitespace-nowrap">
               {monto(cuota.monto)}

@@ -35,8 +35,12 @@ export type FrecuenciaPrestamo =
  * - `fijo_total`: la tasa se cobra una sola vez sobre el capital, sin
  *   importar el plazo. Es el modelo que usaban los préstamos creados antes
  *   de julio de 2026 y se conserva para no alterar sus números.
+ *
+ * - `redito`: préstamo a rédito, sin plazo. Cada periodo se cobra la tasa
+ *   sobre el capital que se debe; lo que el cliente dé de más baja el
+ *   capital. Termina cuando paga todo el capital.
  */
-export type ModalidadInteres = 'por_periodo' | 'amortizado' | 'fijo_total';
+export type ModalidadInteres = 'por_periodo' | 'amortizado' | 'fijo_total' | 'redito';
 
 /**
  * Cómo se acumula la mora cuando hay varias cuotas vencidas a la vez.
@@ -154,6 +158,8 @@ export interface Pago {
    * reunirlos después para reimprimir el recibo de saldo.
    */
   saldo_de_prestamo: boolean;
+  /** Se cobró sólo el rédito de la cuota y las cuotas se corrieron un periodo. */
+  solo_redito?: boolean;
   /**
    * `monto` es el dinero que entró en esta operación. `credito_usado` es lo
    * que se pagó con saldo a favor y `excedente` la parte del dinero que
@@ -210,6 +216,8 @@ export interface Cuota {
   saldo_capital: number;
   monto_pagado: number;
   estado: EstadoCuota;
+  /** Préstamo a rédito: la cuota que representa el capital. No vence. */
+  es_capital?: boolean;
 }
 
 export interface Prestamo {

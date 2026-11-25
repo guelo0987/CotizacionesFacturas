@@ -14,7 +14,7 @@ import {
   FRECUENCIAS,
   FRECUENCIAS_VALIDAS,
   MODALIDADES,
-  MODALIDADES_VALIDAS,
+  MODALIDADES_CON_PLAZO,
   MODOS_MORA,
   MODOS_MORA_VALIDOS,
   calcularMoraCuota,
@@ -51,6 +51,12 @@ import { CampoNumero } from './campos/CampoNumero';
 import { useAccionAsync } from '../hooks/useAccionAsync';
 import { generateWhatsappLoanCuotaUrl } from '../utils/whatsapp';
 import {
+  capitalPendiente,
+  esRedito,
+  etiquetaCuota,
+  reditoActual,
+} from '../utils/documentosPrestamo';
+import {
   AlertCircle,
   Calendar,
   CheckCircle2,
@@ -79,8 +85,12 @@ interface LoansViewProps {
     metodo: MetodoPago,
     referencia?: string,
     montoMora?: number,
-    credito?: number
+    credito?: number,
+    /** Préstamo a rédito: lo que en el mismo cobro va a capital. */
+    capital?: number
   ) => Promise<void>;
+  /** Préstamo con cuotas: cobra sólo el rédito y corre las cuotas un periodo. */
+  onPagarSoloRedito: (cuotaId: string, metodo: MetodoPago, referencia?: string) => Promise<void>;
   onDeletePrestamo: (prestamo: Prestamo) => Promise<void>;
   onConfigurarMora: (
     prestamoId: string,
@@ -124,6 +134,7 @@ export const LoansView: React.FC<LoansViewProps> = ({
   solicitud,
   onGuardarPrestamo,
   onRegistrarPagoCuota,
+  onPagarSoloRedito,
   onDeletePrestamo,
   onConfigurarMora,
   onSaldarPrestamo,
@@ -161,6 +172,9 @@ export const LoansView: React.FC<LoansViewProps> = ({
   const [errorPago, setErrorPago] = useState('');
   // Saldo a favor que el cobrador decide usar en el abono
   const [pagoCredito, setPagoCredito] = useState<number | null>(null);
+  // Cobro de «solo el rédito» (préstamos con cuotas) y abono a capital (a rédito)
+  const [modoCobro, setModoCobro] = useState<'normal' | 'solo_redito'>('normal');
+  const [pagoCapital, setPagoCapital] = useState<number | null>(null);
 
   const { ejecutando, ejecutar } = useAccionAsync();
 
@@ -202,6 +216,7 @@ export const LoansView: React.FC<LoansViewProps> = ({
   );
 
   const frecuenciaActual = FRECUENCIAS[frecuenciaSegura(formData.frecuencia)];
+  const indefinido = formData.modalidad_interes === 'redito';
   // El mismo día de Santo Domingo con el que el servidor acumula la mora
   // (`hoy_negocio()`): los días que se muestran tienen que cuadrar.
   const hoyISO = hoyLocal();
@@ -247,7 +262,10 @@ export const LoansView: React.FC<LoansViewProps> = ({
     const fallo = primerError(
       validarMonto(formData.monto_prestado, 'El monto prestado', { min: 1 }),
       validarPorcentaje(formData.tasa_interes, 'La tasa de interés'),
-      validarEntero(formData.num_cuotas, 'El número de cuotas', 1, 120),
+      // A rédito no hay número de cuotas: se cobra hasta que pague el capital
+      formData.modalidad_interes === 'redito'
+        ? { valido: true }
+        : validarEntero(formData.num_cuotas, 'El número de cuotas', 1, 120),
       validarFecha(formData.fecha_inicio, 'La fecha de inicio')
     );
     if (fallo) {
@@ -265,7 +283,7 @@ export const LoansView: React.FC<LoansViewProps> = ({
           decimales: 2,
         }),
         tasa_interes: formData.tasa_interes ?? 0,
-        num_cuotas: formData.num_cuotas ?? 1,
+        num_cuotas: formData.modalidad_interes === 'redito' ? 1 : formData.num_cuotas ?? 1,
         frecuencia: formData.frecuencia,
         modalidad_interes: formData.modalidad_interes,
         fecha_inicio: formData.fecha_inicio,
@@ -287,6 +305,8 @@ export const LoansView: React.FC<LoansViewProps> = ({
     setPagoRef('');
     setErrorPago('');
     setPagoCredito(null);
+    setModoCobro('normal');
+    setPagoCapital(null);
   };
 
   /** Saldo a favor del cliente de un préstamo. */
@@ -297,6 +317,23 @@ export const LoansView: React.FC<LoansViewProps> = ({
    * cuota» son lo que se paga; lo que pase de la cuota queda a favor del
    * cliente, y el saldo usado se descuenta del efectivo que entrega.
    */
+  const prestamoEnPago = cuotaEnPago
+    ? state.prestamos.find((p) => p.id === cuotaEnPago.prestamo_id) ?? null
+    : null;
+  // «Solo rédito» en un préstamo con cuotas: la cuota sin abonos y con el
+  // rédito separado del capital
+  const admiteSoloRedito = Boolean(
+    cuotaEnPago &&
+      prestamoEnPago &&
+      !esRedito(prestamoEnPago) &&
+      !cuotaEnPago.es_capital &&
+      (cuotaEnPago.monto_pagado || 0) === 0 &&
+      cuotaEnPago.interes > 0 &&
+      cuotaEnPago.capital > 0
+  );
+  // A rédito, al cobrar un rédito se puede abonar a capital en el mismo cobro
+  const admiteCapital = Boolean(prestamoEnPago && esRedito(prestamoEnPago) && cuotaEnPago && !cuotaEnPago.es_capital);
+
   const repartoAbono = (() => {
     if (!cuotaEnPago) return null;
     const prestamo = state.prestamos.find((p) => p.id === cuotaEnPago.prestamo_id);
@@ -323,6 +360,36 @@ export const LoansView: React.FC<LoansViewProps> = ({
     e.preventDefault();
     if (!cuotaEnPago || !repartoAbono) return;
 
+    if (modoCobro === 'solo_redito') {
+      const ok = await ejecutar(() =>
+        onPagarSoloRedito(cuotaEnPago.id, pagoMetodo, limpiarTexto(pagoRef, 120) || undefined)
+      );
+      if (ok) setCuotaPagoId(null);
+      return;
+    }
+
+    // A rédito: en el mismo cobro puede ir una parte a capital
+    const capital = redondearDinero(pagoCapital ?? 0);
+    if (capital > 0) {
+      const debe = prestamoEnPago ? capitalPendiente(prestamoEnPago) : 0;
+      if (capital > debe) {
+        setErrorPago(`El abono a capital supera lo que debe de capital (${formatCurrency(debe)}).`);
+        return;
+      }
+      if (repartoAbono.aCuota > repartoAbono.restante) {
+        setErrorPago('Lo que pase del rédito ponlo en «Abono a capital».');
+        return;
+      }
+      // Sólo capital: no hace falta cobrar nada del rédito
+      if (repartoAbono.aMora + repartoAbono.aCuota <= 0) {
+        const ok = await ejecutar(() =>
+          onRegistrarPagoCuota(cuotaEnPago.id, 0, pagoMetodo, limpiarTexto(pagoRef, 120) || undefined, 0, 0, capital)
+        );
+        if (ok) setCuotaPagoId(null);
+        return;
+      }
+    }
+
     const moraPend = moraPendiente(cuotaEnPago);
     if (repartoAbono.aMora > moraPend) {
       setErrorPago(`La parte de mora supera la mora pendiente (${formatCurrency(moraPend)}).`);
@@ -340,7 +407,8 @@ export const LoansView: React.FC<LoansViewProps> = ({
         pagoMetodo,
         limpiarTexto(pagoRef, 120) || undefined,
         repartoAbono.aMora,
-        repartoAbono.credito
+        repartoAbono.credito,
+        capital
       )
     );
 
@@ -532,11 +600,13 @@ export const LoansView: React.FC<LoansViewProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {prestamosFiltrados.map((prestamo) => {
             const cuotas = prestamo.cuotas ?? [];
-            const totalPagado = cuotas.reduce((acc, c) => acc + (c.monto_pagado || 0), 0);
-            const progreso =
-              prestamo.total_a_pagar > 0
-                ? Math.min(100, redondearDinero((totalPagado / prestamo.total_a_pagar) * 100))
-                : 0;
+            const redito = esRedito(prestamo);
+            // A rédito el progreso es el del capital: el total crece cada periodo
+            const meta = redito ? Number(prestamo.monto_prestado) : prestamo.total_a_pagar;
+            const totalPagado = redito
+              ? redondearDinero(Number(prestamo.monto_prestado) - capitalPendiente(prestamo))
+              : cuotas.reduce((acc, c) => acc + (c.monto_pagado || 0), 0);
+            const progreso = meta > 0 ? Math.min(100, redondearDinero((totalPagado / meta) * 100)) : 0;
             const atrasadas = cuotas.filter((c) => c.estado === 'atrasada').length;
 
             return (
@@ -554,8 +624,10 @@ export const LoansView: React.FC<LoansViewProps> = ({
                     </h3>
                     <p className="text-sm text-slate-500 flex items-center gap-1 mt-0.5">
                       <Calendar className="w-3 h-3 text-slate-400" />
-                      Inicio: {formatDate(prestamo.fecha_inicio)} · {prestamo.num_cuotas} cuotas{' '}
-                      {FRECUENCIAS[frecuenciaSegura(prestamo.frecuencia)].plural}
+                      Inicio: {formatDate(prestamo.fecha_inicio)} ·{' '}
+                      {redito
+                        ? `Plazo indefinido (${FRECUENCIAS[frecuenciaSegura(prestamo.frecuencia)].adjetivo})`
+                        : `${prestamo.num_cuotas} cuotas ${FRECUENCIAS[frecuenciaSegura(prestamo.frecuencia)].plural}`}
                     </p>
                   </button>
 
@@ -596,7 +668,7 @@ export const LoansView: React.FC<LoansViewProps> = ({
                   </div>
                   <div>
                     <span className="text-[11px] text-slate-500 block">
-                      Interés ({prestamo.tasa_interes}%
+                      {redito ? 'Rédito' : 'Interés'} ({prestamo.tasa_interes}%
                       {modalidadSegura(prestamo.modalidad_interes) === 'fijo_total'
                         ? ' único'
                         : ` ${FRECUENCIAS[frecuenciaSegura(prestamo.frecuencia)].adjetivo}`}
@@ -606,13 +678,17 @@ export const LoansView: React.FC<LoansViewProps> = ({
                       )
                     </span>
                     <span className="font-bold text-slate-700">
-                      +{formatCurrency(prestamo.interes_total)}
+                      {redito
+                        ? `${formatCurrency(reditoActual(prestamo))}/periodo`
+                        : `+${formatCurrency(prestamo.interes_total)}`}
                     </span>
                   </div>
                   <div>
-                    <span className="text-[11px] text-slate-500 block">Total a pagar</span>
+                    <span className="text-[11px] text-slate-500 block">
+                      {redito ? 'Debe de capital' : 'Total a pagar'}
+                    </span>
                     <span className="font-black text-emerald-700">
-                      {formatCurrency(prestamo.total_a_pagar)}
+                      {formatCurrency(redito ? capitalPendiente(prestamo) : prestamo.total_a_pagar)}
                     </span>
                   </div>
                 </div>
@@ -631,9 +707,9 @@ export const LoansView: React.FC<LoansViewProps> = ({
 
                 <div className="space-y-1">
                   <div className="flex justify-between text-xs font-semibold">
-                    <span className="text-slate-500">Progreso del saldo</span>
+                    <span className="text-slate-500">{redito ? 'Capital pagado' : 'Progreso del saldo'}</span>
                     <span className="text-emerald-700">
-                      {formatCurrency(totalPagado)} / {formatCurrency(prestamo.total_a_pagar)} (
+                      {formatCurrency(totalPagado)} / {formatCurrency(meta)} (
                       {progreso.toFixed(0)}%)
                     </span>
                   </div>
@@ -753,12 +829,32 @@ export const LoansView: React.FC<LoansViewProps> = ({
                   <label htmlFor="pres-cuotas" className="block text-sm font-semibold text-slate-700 mb-1">
                     Número de cuotas *
                   </label>
-                  <CampoNumero
-                    id="pres-cuotas"
-                    value={formData.num_cuotas}
-                    onChange={(num_cuotas) => setFormData({ ...formData, num_cuotas })}
-                    max={120}
-                  />
+                  {indefinido ? (
+                    <div className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-500">
+                      Sin plazo
+                    </div>
+                  ) : (
+                    <CampoNumero
+                      id="pres-cuotas"
+                      value={formData.num_cuotas}
+                      onChange={(num_cuotas) => setFormData({ ...formData, num_cuotas })}
+                      max={120}
+                    />
+                  )}
+                  <label className="mt-1.5 flex items-center gap-1.5 text-xs font-semibold text-slate-700 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={indefinido}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          modalidad_interes: e.target.checked ? 'redito' : 'por_periodo',
+                        })
+                      }
+                      className="w-4 h-4 accent-emerald-600"
+                    />
+                    Indefinido (a rédito)
+                  </label>
                 </div>
 
                 <div>
@@ -782,6 +878,13 @@ export const LoansView: React.FC<LoansViewProps> = ({
                 </div>
               </div>
 
+              {indefinido ? (
+                <div className="bg-sky-50 border border-sky-200 rounded-xl p-3 text-xs text-sky-900 leading-snug">
+                  <strong>A rédito:</strong> cada periodo se cobra el rédito sobre el capital que se deba. Lo
+                  que el cliente pague de más baja el capital y el rédito siguiente sale menor. Termina
+                  cuando paga todo el capital.
+                </div>
+              ) : (
               <div>
                 <label htmlFor="pres-modalidad" className="block text-sm font-semibold text-slate-700 mb-1">
                   Cómo se cobra el interés *
@@ -797,18 +900,21 @@ export const LoansView: React.FC<LoansViewProps> = ({
                   }
                   className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-emerald-500"
                 >
-                  {MODALIDADES_VALIDAS.map((id) => (
+                  {MODALIDADES_CON_PLAZO.map((id) => (
                     <option key={id} value={id}>
                       {MODALIDADES[id].descripcion(frecuenciaActual.adjetivo)}
                     </option>
                   ))}
                 </select>
               </div>
+              )}
 
               <div>
                 <label htmlFor="pres-tasa" className="block text-sm font-semibold text-slate-700 mb-1">
                   {formData.modalidad_interes === 'fijo_total'
                     ? 'Tasa de interés total (%) *'
+                    : indefinido
+                    ? `Rédito ${frecuenciaActual.adjetivo} (%) *`
                     : `Tasa de interés ${frecuenciaActual.adjetivo} (%) *`}
                 </label>
                 <CampoNumero
@@ -825,6 +931,8 @@ export const LoansView: React.FC<LoansViewProps> = ({
                     ? `Se cobra ${formData.tasa_interes ?? 0}% ${frecuenciaActual.adjetivo} sobre el capital completo, en cada una de las ${calculo.numCuotas} cuotas.`
                     : formData.modalidad_interes === 'amortizado'
                     ? `Se cobra ${formData.tasa_interes ?? 0}% ${frecuenciaActual.adjetivo} sobre el saldo que queda: el interés baja cuota a cuota mientras el capital se liquida.`
+                    : indefinido
+                    ? `Cada periodo se cobra ${formData.tasa_interes ?? 0}% sobre el capital que se deba.`
                     : 'Se cobra una sola vez sobre el capital, sin importar el plazo.'}
                 </p>
               </div>
@@ -866,6 +974,27 @@ export const LoansView: React.FC<LoansViewProps> = ({
                   </div>
                 ) : null}
 
+                {indefinido ? (
+                  <>
+                    <div className="flex justify-between text-sm text-slate-700">
+                      <span>
+                        Rédito {frecuenciaActual.adjetivo} ({formData.tasa_interes ?? 0}%):
+                      </span>
+                      <span className="font-bold text-slate-900">{formatCurrency(calculo.interesPorCuota)}</span>
+                    </div>
+                    <div className="flex justify-between text-sm font-black text-emerald-800 pt-1.5 border-t border-emerald-200">
+                      <span>Plazo:</span>
+                      <span>Indefinido</span>
+                    </div>
+                    <p className="text-[11px] text-emerald-900/70 pt-1 leading-snug">
+                      El rédito baja cuando el cliente abona a capital. Equivale a una tasa simple de{' '}
+                      <strong>{tasaAnualEquivalente(formData.tasa_interes ?? 0, formData.frecuencia)}% anual</strong>.
+                    </p>
+                  </>
+                ) : null}
+
+                {indefinido ? null : (
+                <>
                 {formData.modalidad_interes === 'amortizado' ? (
                   <div className="flex justify-between text-sm text-slate-700">
                     <span>Interés de la 1.ª cuota ({formData.tasa_interes ?? 0}%):</span>
@@ -953,6 +1082,8 @@ export const LoansView: React.FC<LoansViewProps> = ({
                     </div>
                   </details>
                 ) : null}
+                </>
+                )}
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-200">
@@ -972,6 +1103,8 @@ export const LoansView: React.FC<LoansViewProps> = ({
                     ? 'Guardando…'
                     : editandoId
                     ? 'Guardar cambios'
+                    : indefinido
+                    ? 'Crear préstamo a rédito'
                     : 'Generar préstamo y cuotas'}
                 </button>
               </div>
@@ -1023,9 +1156,15 @@ export const LoansView: React.FC<LoansViewProps> = ({
                   </span>
                 </div>
                 <div>
-                  <span className="text-slate-500 text-[11px] block">Total a pagar</span>
+                  <span className="text-slate-500 text-[11px] block">
+                    {esRedito(selectedPrestamo) ? 'Debe de capital' : 'Total a pagar'}
+                  </span>
                   <span className="font-bold text-emerald-700">
-                    {formatCurrency(selectedPrestamo.total_a_pagar)}
+                    {formatCurrency(
+                      esRedito(selectedPrestamo)
+                        ? capitalPendiente(selectedPrestamo)
+                        : selectedPrestamo.total_a_pagar
+                    )}
                   </span>
                 </div>
                 <div className="col-span-2 pt-1 border-t border-slate-200 text-[11px] text-slate-500">
@@ -1035,6 +1174,9 @@ export const LoansView: React.FC<LoansViewProps> = ({
                       FRECUENCIAS[frecuenciaSegura(selectedPrestamo.frecuencia)].adjetivo;
                     const enTotal = `${formatCurrency(selectedPrestamo.interes_total)} en total.`;
 
+                    if (modalidad === 'redito') {
+                      return `A rédito, sin plazo: ${selectedPrestamo.tasa_interes}% ${adjetivo} sobre el capital que se deba. Rédito actual ${formatCurrency(reditoActual(selectedPrestamo))} por periodo; baja cuando abona a capital.`;
+                    }
                     if (modalidad === 'por_periodo') {
                       return `Interés ${selectedPrestamo.tasa_interes}% ${adjetivo} sobre el capital completo, cobrado en cada una de las ${selectedPrestamo.num_cuotas} cuotas · ${enTotal}`;
                     }
@@ -1237,7 +1379,9 @@ export const LoansView: React.FC<LoansViewProps> = ({
               })()}
 
               <h4 className="text-sm font-bold text-slate-700 uppercase tracking-wider">
-                Calendario de cuotas ({selectedPrestamo.cuotas?.length ?? 0})
+                {esRedito(selectedPrestamo)
+                  ? 'Réditos y capital'
+                  : `Calendario de cuotas (${selectedPrestamo.cuotas?.length ?? 0})`}
               </h4>
 
               <div className="space-y-2">
@@ -1275,7 +1419,7 @@ export const LoansView: React.FC<LoansViewProps> = ({
                       <div className="space-y-0.5 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-bold text-slate-800 text-sm">
-                            Cuota #{cuota.numero}
+                            {etiquetaCuota(cuota, selectedPrestamo)}
                           </span>
                           <span
                             className={`text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${
@@ -1294,13 +1438,21 @@ export const LoansView: React.FC<LoansViewProps> = ({
 
                         <p className="text-xs text-slate-500 flex items-center gap-1">
                           <Calendar className="w-3 h-3 text-slate-400" />
-                          Vence: {formatDate(cuota.fecha_vencimiento)}
+                          {cuota.es_capital
+                            ? 'Sin fecha: abona cuando pueda'
+                            : `Vence: ${formatDate(cuota.fecha_vencimiento)}`}
                         </p>
 
                         {/* Desglose de la cuota. Los préstamos creados antes
                             de guardarlo no lo tienen: se omite en vez de
                             mostrar ceros que no significan nada. */}
-                        {cuota.interes > 0 || cuota.capital > 0 ? (
+                        {esRedito(selectedPrestamo) && !cuota.es_capital ? (
+                          <p className="text-[11px] text-slate-500">
+                            {selectedPrestamo.tasa_interes}% sobre {formatCurrency(cuota.saldo_capital)} de capital
+                          </p>
+                        ) : !cuota.es_capital && cuota.capital <= 0 && cuota.interes > 0 ? (
+                          <p className="text-[11px] text-slate-500">Solo rédito: las cuotas se corrieron un periodo</p>
+                        ) : !cuota.es_capital && (cuota.interes > 0 || cuota.capital > 0) ? (
                           <p className="text-[11px] text-slate-500">
                             Interés {formatCurrency(cuota.interes)} · capital{' '}
                             {formatCurrency(cuota.capital)} · saldo{' '}
@@ -1340,7 +1492,7 @@ export const LoansView: React.FC<LoansViewProps> = ({
                               onClick={() => abrirPagoCuota(cuota)}
                               className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-[11px] transition-all shadow-sm"
                             >
-                              Abonar
+                              {cuota.es_capital ? 'Abonar a capital' : 'Abonar'}
                             </button>
                           ) : (
                             <span className="text-[11px] text-emerald-700 font-bold flex items-center gap-1">
@@ -1384,15 +1536,17 @@ export const LoansView: React.FC<LoansViewProps> = ({
                             </button>
                           ) : null}
 
-                          <a
-                            href={recordatorio}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="p-1 text-emerald-700 hover:text-emerald-800 bg-emerald-50 rounded-md border border-emerald-200"
-                            title="Enviar recordatorio por WhatsApp"
-                          >
-                            <Share2 className="w-3 h-3" />
-                          </a>
+                          {cuota.es_capital ? null : (
+                            <a
+                              href={recordatorio}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="p-1 text-emerald-700 hover:text-emerald-800 bg-emerald-50 rounded-md border border-emerald-200"
+                              title="Enviar recordatorio por WhatsApp"
+                            >
+                              <Share2 className="w-3 h-3" />
+                            </a>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1498,7 +1652,7 @@ export const LoansView: React.FC<LoansViewProps> = ({
                     {saldo.lineas.map((l) => (
                       <div key={l.cuotaId} className="flex justify-between text-slate-700">
                         <span>
-                          Cuota #{l.numero}
+                          {l.numero === 9999 && esRedito(prestamoSaldando) ? 'Capital' : `${esRedito(prestamoSaldando) ? 'Rédito' : 'Cuota'} #${l.numero}`}
                           {l.mora > 0 ? (
                             <span className="text-amber-800"> + mora</span>
                           ) : null}
@@ -1675,9 +1829,13 @@ export const LoansView: React.FC<LoansViewProps> = ({
           <div className="bg-white border border-slate-200 rounded-2xl max-w-sm w-full p-5 space-y-4 shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-200 pb-3">
               <div>
-                <h3 className="text-base font-bold text-slate-900">Abonar a la cuota</h3>
+                <h3 className="text-base font-bold text-slate-900">
+                  {cuotaEnPago.es_capital ? 'Abonar a capital' : `Cobrar ${etiquetaCuota(cuotaEnPago, prestamoEnPago).toLowerCase()}`}
+                </h3>
                 <p className="text-sm text-slate-500">
-                  Cuota #{cuotaEnPago.numero} · vence {formatDate(cuotaEnPago.fecha_vencimiento)}
+                  {cuotaEnPago.es_capital
+                    ? 'Lo que abone baja el rédito desde el próximo periodo'
+                    : `Vence ${formatDate(cuotaEnPago.fecha_vencimiento)}`}
                 </p>
               </div>
               <button
@@ -1700,9 +1858,61 @@ export const LoansView: React.FC<LoansViewProps> = ({
                 </div>
               ) : null}
 
+              {admiteSoloRedito ? (
+                <div className="grid grid-cols-2 gap-1 p-1 bg-slate-100 rounded-xl" role="tablist" aria-label="Tipo de cobro">
+                  {(
+                    [
+                      ['normal', 'Cuota completa'],
+                      ['solo_redito', 'Solo el rédito'],
+                    ] as const
+                  ).map(([valor, etiqueta]) => (
+                    <button
+                      key={valor}
+                      type="button"
+                      role="tab"
+                      aria-selected={modoCobro === valor}
+                      onClick={() => {
+                        setModoCobro(valor);
+                        setErrorPago('');
+                      }}
+                      className={`py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                        modoCobro === valor ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                      }`}
+                    >
+                      {etiqueta}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+
+              {modoCobro === 'solo_redito' ? (
+                <div className="bg-sky-50 border border-sky-200 p-3 rounded-xl text-sm space-y-1">
+                  <div className="flex justify-between text-slate-700">
+                    <span>Rédito de la cuota:</span>
+                    <span className="font-bold">{formatCurrency(cuotaEnPago.interes)}</span>
+                  </div>
+                  {moraPendiente(cuotaEnPago) > 0 ? (
+                    <div className="flex justify-between text-amber-900">
+                      <span>Mora:</span>
+                      <span className="font-bold">{formatCurrency(moraPendiente(cuotaEnPago))}</span>
+                    </div>
+                  ) : null}
+                  <div className="flex justify-between font-black text-slate-900 pt-1 border-t border-sky-200">
+                    <span>Cobras:</span>
+                    <span>{formatCurrency(redondearDinero(cuotaEnPago.interes + moraPendiente(cuotaEnPago)))}</span>
+                  </div>
+                  <p className="text-xs text-sky-900 pt-1 leading-snug">
+                    El capital de esta cuota ({formatCurrency(cuotaEnPago.capital)}) no se paga ahora: esta cuota y
+                    las siguientes se corren un periodo y el préstamo termina uno después.
+                  </p>
+                </div>
+              ) : null}
+
+              {modoCobro === 'solo_redito' ? null : (
+              <>
               <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl text-sm space-y-1">
                 <div className="flex justify-between text-slate-600">
-                  <span>Monto de la cuota:</span>
+                  <span>{cuotaEnPago.es_capital ? 'Capital prestado:' : esRedito(prestamoEnPago) ? 'Rédito del periodo:' : 'Monto de la cuota:'}</span>
                   <span className="font-bold text-slate-800">
                     {formatCurrency(cuotaEnPago.monto)}
                   </span>
@@ -1791,6 +2001,39 @@ export const LoansView: React.FC<LoansViewProps> = ({
                 </div>
               )}
 
+              {admiteCapital && prestamoEnPago ? (
+                <div>
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <label htmlFor="cuota-capital" className="block text-sm font-semibold text-slate-700">
+                      Abono a capital <span className="font-normal text-slate-400">— opcional</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPagoCapital(capitalPendiente(prestamoEnPago));
+                        setErrorPago('');
+                      }}
+                      className="text-xs font-bold text-emerald-700 hover:underline"
+                    >
+                      Todo el capital
+                    </button>
+                  </div>
+                  <CampoMoneda
+                    id="cuota-capital"
+                    value={pagoCapital}
+                    onChange={(monto) => {
+                      setPagoCapital(monto);
+                      setErrorPago('');
+                    }}
+                    className="font-black"
+                  />
+                  <p className="text-xs text-slate-500 mt-1">
+                    Debe de capital {formatCurrency(capitalPendiente(prestamoEnPago))}. Lo que abone baja el rédito
+                    desde el próximo periodo.
+                  </p>
+                </div>
+              ) : null}
+
               {repartoAbono && repartoAbono.saldoDisponible > 0 ? (
                 <div className="bg-sky-50 border border-sky-200 rounded-xl p-3 space-y-1.5">
                   <div className="flex items-center justify-between gap-2">
@@ -1845,11 +2088,16 @@ export const LoansView: React.FC<LoansViewProps> = ({
                   <div className="flex justify-between items-center">
                     <span className="font-semibold text-emerald-900">Efectivo que recibes:</span>
                     <span className="font-black text-emerald-700">
-                      {formatCurrency(Math.max(0, repartoAbono.efectivo))}
+                      {formatCurrency(
+                        redondearDinero(Math.max(0, repartoAbono.efectivo) + (admiteCapital ? pagoCapital ?? 0 : 0))
+                      )}
                     </span>
                   </div>
                 </div>
               ) : null}
+
+              </>
+              )}
 
               <div>
                 <label htmlFor="cuota-metodo" className="block text-sm font-semibold text-slate-700 mb-1">
@@ -1895,7 +2143,11 @@ export const LoansView: React.FC<LoansViewProps> = ({
                   disabled={ejecutando}
                   className="px-4 py-2 rounded-xl text-sm font-bold bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white transition-colors"
                 >
-                  {ejecutando ? 'Registrando…' : 'Confirmar abono'}
+                  {ejecutando
+                    ? 'Registrando…'
+                    : modoCobro === 'solo_redito'
+                    ? 'Cobrar solo el rédito'
+                    : 'Confirmar abono'}
                 </button>
               </div>
             </form>

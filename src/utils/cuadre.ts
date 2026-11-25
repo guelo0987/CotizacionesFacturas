@@ -1,7 +1,7 @@
 import type { AppState, MetodoCobro, MetodoPago } from '../types';
 import { ZONA_NEGOCIO, diaLocal } from './sanitizer';
 import { redondearDinero } from './validacion';
-import { referenciaPrestamo } from './documentosPrestamo';
+import { etiquetaCuota, plazoPrestamo, referenciaPrestamo } from './documentosPrestamo';
 
 /**
  * Cuadre del día: cuánto dinero entró y salió en una fecha.
@@ -147,7 +147,7 @@ export function calcularCuadre(datos: DatosCuadre, dia: string, zonaHoraria: str
       id: pago.id,
       tipo: 'cuota',
       cliente: nombreCliente(prestamo?.cliente_id),
-      concepto: `Cuota${cuota ? ` #${cuota.numero}` : ''} · ${referencia}`,
+      concepto: `${cuota ? etiquetaCuota(cuota, prestamo) : 'Cuota'}${pago.solo_redito ? ' (solo rédito)' : ''} · ${referencia}`,
       mora,
     });
   }
@@ -192,7 +192,7 @@ export function calcularCuadre(datos: DatosCuadre, dia: string, zonaHoraria: str
       fecha: prestamo.created_at && delDia(prestamo.created_at) ? prestamo.created_at : `${dia}T00:00:00`,
       tipo: 'prestamo',
       cliente: nombreCliente(prestamo.cliente_id),
-      concepto: `Préstamo entregado · ${referenciaPrestamo(prestamo)} (${prestamo.num_cuotas} cuotas)`,
+      concepto: `Préstamo entregado · ${referenciaPrestamo(prestamo)} (${plazoPrestamo(prestamo).toLowerCase()})`,
       metodo: null,
       entrada: 0,
       salida: Number(prestamo.monto_prestado) || 0,

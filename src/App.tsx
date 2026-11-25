@@ -570,7 +570,9 @@ export function App() {
       modalidadSegura(datos.modalidad_interes)
     ).interesTotal;
 
-    if (Math.abs(Number(guardado.interes_total) - esperado) > 0.01) {
+    // A rédito el interés va sumando un periodo tras otro (y uno con fecha
+    // pasada ya nace con varios): no hay un total que comparar.
+    if (guardado.modalidad_interes !== 'redito' && Math.abs(Number(guardado.interes_total) - esperado) > 0.01) {
       avisarError(
         `El préstamo se guardó, pero el servidor calculó ${formatCurrency(
           guardado.interes_total
@@ -580,7 +582,13 @@ export function App() {
       return;
     }
 
-    exito(datos.id ? 'Préstamo actualizado.' : 'Préstamo creado con su calendario de cuotas.');
+    exito(
+      datos.id
+        ? 'Préstamo actualizado.'
+        : guardado.modalidad_interes === 'redito'
+        ? 'Préstamo a rédito creado.'
+        : 'Préstamo creado con su calendario de cuotas.'
+    );
   };
 
   /** Devuelve el préstamo saldado, para abrir su recibo enseguida. */
@@ -652,7 +660,8 @@ export function App() {
     metodo: MetodoPago,
     referencia?: string,
     montoMora = 0,
-    credito = 0
+    credito = 0,
+    capital = 0
   ) => {
     const actualizado = await supabaseDataService.registrarPagoCuota(
       cuotaId,
@@ -660,9 +669,33 @@ export function App() {
       metodo,
       referencia,
       montoMora,
-      credito
+      credito,
+      capital
     );
 
+    ponerPrestamo(actualizado);
+    await refrescarCredito(actualizado.cliente_id);
+
+    const excedente =
+      ultimoPago((actualizado.pagos ?? []).filter((p) => p.cuota_id === cuotaId))?.excedente ?? 0;
+    exito(
+      (actualizado.estado === 'saldado'
+        ? '¡Préstamo saldado por completo!'
+        : capital > 0
+        ? `Cobro registrado: ${formatCurrency(capital)} fueron a capital.`
+        : 'Abono registrado correctamente.') +
+        (excedente > 0 ? ` Quedan ${formatCurrency(excedente)} a favor del cliente.` : '')
+    );
+  };
+
+  const handlePagarSoloRedito = async (cuotaId: string, metodo: MetodoPago, referencia?: string) => {
+    const actualizado = await supabaseDataService.pagarSoloRedito(cuotaId, metodo, referencia);
+    ponerPrestamo(actualizado);
+    exito('Rédito cobrado. Esta cuota y las siguientes se corrieron un periodo.');
+  };
+
+  /** Pone en el estado un préstamo recién devuelto por el servidor, con sus pagos. */
+  const ponerPrestamo = (actualizado: Prestamo) =>
     setState((prev) => ({
       ...prev,
       prestamos: prev.prestamos.map((p) => (p.id === actualizado.id ? actualizado : p)),
@@ -671,17 +704,6 @@ export function App() {
         ...prev.pagos.filter((p) => p.prestamo_id !== actualizado.id),
       ],
     }));
-    await refrescarCredito(actualizado.cliente_id);
-
-    const excedente =
-      ultimoPago((actualizado.pagos ?? []).filter((p) => p.cuota_id === cuotaId))?.excedente ?? 0;
-    exito(
-      (actualizado.estado === 'saldado'
-        ? '¡Préstamo saldado por completo!'
-        : 'Abono registrado correctamente.') +
-        (excedente > 0 ? ` Quedan ${formatCurrency(excedente)} a favor del cliente.` : '')
-    );
-  };
 
   // -------------------------------------------------------------------
   // Saldo a favor
@@ -894,6 +916,7 @@ export function App() {
             solicitud={solicitud}
             onGuardarPrestamo={handleGuardarPrestamo}
             onRegistrarPagoCuota={handleRegistrarPagoCuota}
+            onPagarSoloRedito={handlePagarSoloRedito}
             onConfigurarMora={handleConfigurarMora}
             onSaldarPrestamo={handleSaldarPrestamo}
             onDeletePrestamo={handleDeletePrestamo}

@@ -130,7 +130,17 @@ export const MODALIDADES: Record<ModalidadInteres, DefinicionModalidad> = {
     descripcion: () => 'Interés único sobre el capital — se cobra una sola vez',
     amortiza: false,
   },
+  redito: {
+    etiqueta: 'A rédito (plazo indefinido)',
+    descripcion: (adj) => `A rédito — interés ${adj} sobre el capital que se deba, sin plazo`,
+    amortiza: false,
+  },
 };
+
+/** Las formas de interés con número de cuotas; el rédito se elige con «Indefinido». */
+export const MODALIDADES_CON_PLAZO = (Object.keys(MODALIDADES) as ModalidadInteres[]).filter(
+  (m) => m !== 'redito'
+);
 
 export const MODALIDADES_VALIDAS = Object.keys(MODALIDADES) as ModalidadInteres[];
 
@@ -185,11 +195,12 @@ export function calcularDesgloseCuotas(
 ): DesgloseCuota[] {
   const capital = Math.max(0, montoPrestado || 0);
   const tasa = Math.max(0, tasaInteres || 0) / 100;
-  const n = Math.max(1, Math.floor(numCuotas || 1));
+  // A rédito no hay plazo: se muestra el primer periodo (rédito + capital)
+  const n = modalidad === 'redito' ? 1 : Math.max(1, Math.floor(numCuotas || 1));
 
   // Interés que carga cada cuota cuando el capital no se amortiza.
   const interesFijoPorCuota =
-    modalidad === 'por_periodo'
+    modalidad === 'por_periodo' || modalidad === 'redito'
       ? redondearDinero(capital * tasa)
       : modalidad === 'fijo_total'
       ? redondearDinero((capital * tasa) / n)

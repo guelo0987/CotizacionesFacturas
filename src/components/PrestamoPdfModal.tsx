@@ -2,7 +2,7 @@ import React from 'react';
 import type { BusinessSettings, Cliente, Cuota, MovimientoCredito, Pago, Prestamo } from '../types';
 import { mensajeAbono, mensajePrestamo, mensajeSaldo } from '../utils/whatsapp';
 import { VistaPreviaModal } from './documentos/VistaPreviaModal';
-import { referenciaAbono, referenciaPrestamo } from '../utils/documentosPrestamo';
+import { etiquetaCuotaDe, plazoPrestamo, referenciaAbono, referenciaPrestamo } from '../utils/documentosPrestamo';
 import {
   ComprobantePrestamoA4,
   ComprobantePrestamoTermico,
@@ -103,7 +103,7 @@ export const PrestamoPdfModal: React.FC<PrestamoPdfModalProps> = ({
     return (
       <VistaPreviaModal
         titulo={`Recibo de abono · ${referencia}`}
-        subtitulo={`Cuota #${cuota.numero} de ${prestamo.num_cuotas}`}
+        subtitulo={etiquetaCuotaDe(cuota, prestamo)}
         archivoBase={referencia}
         tituloCompartir={`Recibo de abono ${referencia}`}
         textoWhatsapp={mensajeAbono(prestamo, cuota, pago, cliente, settings, saldoAFavor)}
@@ -144,7 +144,7 @@ export const PrestamoPdfModal: React.FC<PrestamoPdfModalProps> = ({
   return (
     <VistaPreviaModal
       titulo={`Comprobante de préstamo · ${referencia}`}
-      subtitulo={`${prestamo.num_cuotas} cuotas · listo para imprimir o descargar`}
+      subtitulo={`${plazoPrestamo(prestamo)} · listo para imprimir o descargar`}
       archivoBase={referencia}
       tituloCompartir={`Comprobante de préstamo ${referencia}`}
       textoWhatsapp={mensajePrestamo(prestamo, cliente, settings)}

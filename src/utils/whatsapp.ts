@@ -10,7 +10,16 @@ import type {
 } from '../types';
 import { formatCurrency, formatDate } from './sanitizer';
 import { telefonoParaWhatsapp } from './validacion';
-import { METODOS_PAGO, estadoTrasPago, referenciaPrestamo } from './documentosPrestamo';
+import {
+  METODOS_PAGO,
+  descripcionInteres,
+  esRedito,
+  estadoTrasPago,
+  etiquetaCuota,
+  etiquetaCuotaDe,
+  referenciaPrestamo,
+  reditoActual,
+} from './documentosPrestamo';
 import { textoVencimiento, type ClientePorCobrar } from './cobros';
 import { fechaLarga, type Cuadre } from './cuadre';
 
@@ -108,9 +117,15 @@ export function mensajePrestamo(
   msg += `Hola *${cliente?.nombre || 'Cliente'}*,\n`;
   msg += `Le enviamos el detalle de su préstamo:\n\n`;
   msg += `💵 *Capital prestado:* ${formatCurrency(prestamo.monto_prestado)}\n`;
-  msg += `📊 *Interés total:* ${formatCurrency(prestamo.interes_total)}\n`;
-  msg += `💰 *Total a pagar:* ${formatCurrency(prestamo.total_a_pagar)}\n`;
-  msg += `🗓️ *Cuotas:* ${prestamo.num_cuotas} (${prestamo.frecuencia})\n`;
+  if (esRedito(prestamo)) {
+    msg += `📊 *Rédito:* ${descripcionInteres(prestamo)}\n`;
+    msg += `💰 *Rédito por periodo hoy:* ${formatCurrency(reditoActual(prestamo))}\n`;
+    msg += `🗓️ *Plazo:* indefinido (${prestamo.frecuencia}), hasta que pague el capital\n`;
+  } else {
+    msg += `📊 *Interés total:* ${formatCurrency(prestamo.interes_total)}\n`;
+    msg += `💰 *Total a pagar:* ${formatCurrency(prestamo.total_a_pagar)}\n`;
+    msg += `🗓️ *Cuotas:* ${prestamo.num_cuotas} (${prestamo.frecuencia})\n`;
+  }
   msg += `📅 *Inicio:* ${formatDate(prestamo.fecha_inicio)}\n\n`;
   msg += `Adjuntamos el comprobante con el calendario completo de cuotas.\n¡Gracias por su confianza!`;
 
@@ -128,17 +143,24 @@ export function mensajeAbono(
 ): string {
   const businessName = settings?.business_name || 'Nuestro negocio';
   // El saldo que dejó este abono, igual que en el recibo que acompaña
-  const saldo = estadoTrasPago(prestamo, cuota, pago).saldoPrestamo;
+  const tras = estadoTrasPago(prestamo, cuota, pago);
+  const saldo = tras.saldoPrestamo;
 
   let msg = `*Recibo de abono — ${businessName}*\n\n`;
   msg += `Hola *${cliente?.nombre || 'Cliente'}*,\n`;
   msg += `Confirmamos su pago:\n\n`;
   msg += lineasCredito(pago.monto, pago.credito_usado, pago.excedente);
   msg += `📅 *Fecha:* ${formatDate(pago.fecha)}\n`;
-  msg += `🧾 *Cuota:* #${cuota.numero} de ${prestamo.num_cuotas}\n`;
-  msg += saldo > 0
-    ? `📌 *Saldo del préstamo:* ${formatCurrency(saldo)}\n`
-    : `🟢 *PRÉSTAMO SALDADO POR COMPLETO*\n`;
+  msg += `🧾 *Pago de:* ${etiquetaCuotaDe(cuota, prestamo)}${pago.solo_redito ? ' (solo el rédito; las cuotas se corren un periodo)' : ''}\n`;
+  if (tras.capitalPendiente !== null) {
+    msg += tras.capitalPendiente > 0
+      ? `📌 *Capital que debe:* ${formatCurrency(tras.capitalPendiente)}\n`
+      : `🟢 *CAPITAL PAGADO POR COMPLETO*\n`;
+  } else {
+    msg += saldo > 0
+      ? `📌 *Saldo del préstamo:* ${formatCurrency(saldo)}\n`
+      : `🟢 *PRÉSTAMO SALDADO POR COMPLETO*\n`;
+  }
   if (saldoAFavor !== null) msg += `💰 *Su saldo a favor:* ${formatCurrency(saldoAFavor)}\n`;
   msg += `\nAdjuntamos el recibo. ¡Gracias por su puntualidad!`;
 
@@ -174,7 +196,9 @@ export function mensajeSaldo(
   msg += `Hola *${cliente?.nombre || 'Cliente'}*,\n`;
   msg += `Confirmamos que su préstamo quedó saldado por completo.\n\n`;
   msg += lineasCredito(suma((p) => p.monto), suma((p) => p.credito_usado), suma((p) => p.excedente));
-  msg += `🧾 *Cuotas liquidadas:* ${pagos.length} de ${prestamo.num_cuotas}\n`;
+  msg += esRedito(prestamo)
+    ? `🧾 *Capital y réditos liquidados*\n`
+    : `🧾 *Cuotas liquidadas:* ${pagos.length} de ${prestamo.num_cuotas}\n`;
   if (mora > 0) msg += `⚠️ *Incluye mora:* ${formatCurrency(mora)}\n`;
   msg += `🟢 *Saldo pendiente:* ${formatCurrency(0)}\n`;
   if (saldoAFavor !== null) msg += `💰 *Su saldo a favor:* ${formatCurrency(saldoAFavor)}\n`;
@@ -217,7 +241,7 @@ export function generateWhatsappLoanCuotaUrl(
 
   let msg = `*Recordatorio de cuota — ${businessName}*\n\n`;
   msg += `Hola *${cliente?.nombre || 'Cliente'}*,\n`;
-  msg += `Le recordamos el detalle de la cuota #${cuota.numero} de ${prestamo.num_cuotas} de su préstamo:\n\n`;
+  msg += `Le recordamos el detalle de su ${etiquetaCuotaDe(cuota, prestamo).toLowerCase()} de su préstamo:\n\n`;
   msg += `🗓️ *Fecha de vencimiento:* ${formatDate(cuota.fecha_vencimiento)}\n`;
   msg += `💵 *Monto de la cuota:* ${formatCurrency(cuota.monto)}\n`;
 
@@ -292,7 +316,7 @@ export function mensajeRecordatorioCobro(
     : `Le recordamos sus próximos pagos:\n\n`;
 
   for (const item of cliente.cuotas) {
-    msg += `🗓️ *Cuota #${item.cuota.numero}* (${referenciaPrestamo(item.prestamo)}) — ${formatDate(item.cuota.fecha_vencimiento)}`;
+    msg += `🗓️ *${etiquetaCuota(item.cuota, item.prestamo)}* (${referenciaPrestamo(item.prestamo)}) — ${formatDate(item.cuota.fecha_vencimiento)}`;
     msg += ` · ${textoVencimiento(item.dias).toLowerCase()}\n`;
     msg += `   💵 ${formatCurrency(item.restante)}`;
     if (item.mora > 0) msg += ` + mora ${formatCurrency(item.mora)}`;

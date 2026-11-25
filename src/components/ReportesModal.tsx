@@ -176,7 +176,7 @@ export const ReportesModal: React.FC<ReportesModalProps> = ({ state, onClose, on
               MODALIDADES[modalidadSegura(p.modalidad_interes)].etiqueta,
               p.interes_total,
               p.total_a_pagar,
-              p.num_cuotas,
+              p.modalidad_interes === 'redito' ? 'Indefinido' : p.num_cuotas,
               p.frecuencia,
               p.estado,
               cobrado,

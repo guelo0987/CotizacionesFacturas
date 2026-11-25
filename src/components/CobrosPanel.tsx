@@ -8,6 +8,7 @@ import {
   type FiltroCobros,
 } from '../utils/cobros';
 import { construirUrl, mensajeRecordatorioCobro } from '../utils/whatsapp';
+import { etiquetaCuota } from '../utils/documentosPrestamo';
 import { formatCurrency, formatTelefono } from '../utils/sanitizer';
 import { telefonoParaWhatsapp } from '../utils/validacion';
 import { MessageCircle, Phone, X } from 'lucide-react';
@@ -152,7 +153,7 @@ export const CobrosPanel: React.FC<CobrosPanelProps> = ({ state, clientes, onVer
                 const telefono = c.cliente?.telefono ?? '';
                 const conWhatsapp = Boolean(telefono && telefonoParaWhatsapp(telefono));
                 const tono = tonoDias(c.primera.dias);
-                const detalle = c.cuotas.length > 1 ? `${c.cuotas.length} cuotas` : `Cuota #${c.primera.cuota.numero}`;
+                const detalle = c.cuotas.length > 1 ? `${c.cuotas.length} cuotas` : etiquetaCuota(c.primera.cuota, c.primera.prestamo);
                 return (
                   <li key={c.clienteId} className="relative">
                     {/* Tocar la fila abre el préstamo; los botones van aparte, abajo a la derecha */}
